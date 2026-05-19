@@ -1,13 +1,8 @@
-import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
+import SplatViewer from "@/components/viewer/SplatViewerClient";
 
 export const revalidate = 0;
-
-const SplatViewer = dynamic(
-  () => import("@/components/viewer/SplatViewer"),
-  { ssr: false },
-);
 
 export async function generateMetadata({
   params,
