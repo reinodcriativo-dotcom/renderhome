@@ -1,4 +1,5 @@
 import "server-only";
+import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { runMockProcessing } from "./processing";
@@ -26,11 +27,17 @@ export async function createProcessingJob(
     .update({ status: "queued" })
     .eq("id", params.spaceId);
 
-  // Dispara o worker mock em background. Em produção, isto seria substituído
-  // por uma chamada de enqueue (SQS / Redis / pg-boss / Supabase Queue).
-  void runMockProcessing(job.id).catch((err) =>
-    console.error("[jobs] processing failed", err),
-  );
+  // Em serverless (Vercel), a execucao para quando a resposta volta. after()
+  // sinaliza ao runtime para manter o trabalho vivo apos o response — usando
+  // waitUntil internamente em plataformas que suportam (Vercel). Em producao
+  // real isto seria substituido por enqueue em fila + worker dedicado.
+  after(async () => {
+    try {
+      await runMockProcessing(job.id);
+    } catch (err) {
+      console.error("[jobs] processing failed", err);
+    }
+  });
 
   return job;
 }
