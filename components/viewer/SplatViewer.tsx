@@ -1,10 +1,10 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, useGLTF, Bounds } from "@react-three/drei";
+import { OrbitControls, useGLTF, Bounds } from "@react-three/drei";
 import { Component, Suspense, useRef, useState, type ReactNode } from "react";
 
-class ModelErrorBoundary extends Component<
+class CanvasErrorBoundary extends Component<
   { children: ReactNode; fallback: ReactNode },
   { hasError: boolean }
 > {
@@ -13,7 +13,7 @@ class ModelErrorBoundary extends Component<
     return { hasError: true };
   }
   componentDidCatch(err: unknown) {
-    console.warn("[viewer] model load failed, using placeholder", err);
+    console.warn("[viewer] caught error", err);
   }
   render() {
     return this.state.hasError ? this.props.fallback : this.props.children;
@@ -62,6 +62,27 @@ function PlaceholderRoom() {
   );
 }
 
+function Scene({ url }: { url?: string | null }) {
+  if (!url) return <PlaceholderRoom />;
+  return (
+    <CanvasErrorBoundary fallback={<PlaceholderRoom />}>
+      <Suspense fallback={<PlaceholderRoom />}>
+        <Bounds fit clip observe margin={1.2}>
+          <Model url={url} />
+        </Bounds>
+      </Suspense>
+    </CanvasErrorBoundary>
+  );
+}
+
+function ViewerFallback() {
+  return (
+    <div className="w-full h-full flex items-center justify-center text-sm text-muted">
+      Não foi possível carregar a visualização 3D.
+    </div>
+  );
+}
+
 export default function SplatViewer({ url }: { url?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -83,33 +104,25 @@ export default function SplatViewer({ url }: { url?: string | null }) {
       ref={containerRef}
       className="relative w-full h-[60vh] sm:h-[70vh] bg-zinc-950 rounded-xl overflow-hidden border border-border"
     >
-      <Canvas
-        shadows
-        camera={{ position: [4, 3, 6], fov: 50 }}
-        gl={{ antialias: true }}
-      >
-        <color attach="background" args={["#0a0a0a"]} />
-        <ambientLight intensity={0.4} />
-        <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
-        <Suspense fallback={null}>
-          {url ? (
-            <ModelErrorBoundary fallback={<PlaceholderRoom />}>
-              <Bounds fit clip observe margin={1.2}>
-                <Model url={url} />
-              </Bounds>
-            </ModelErrorBoundary>
-          ) : (
-            <PlaceholderRoom />
-          )}
-          <Environment preset="city" />
-        </Suspense>
-        <OrbitControls
-          enableDamping
-          dampingFactor={0.08}
-          minDistance={1}
-          maxDistance={30}
-        />
-      </Canvas>
+      <CanvasErrorBoundary fallback={<ViewerFallback />}>
+        <Canvas
+          shadows
+          camera={{ position: [4, 3, 6], fov: 50 }}
+          gl={{ antialias: true }}
+        >
+          <color attach="background" args={["#0a0a0a"]} />
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
+          <directionalLight position={[-5, 6, -3]} intensity={0.4} />
+          <Scene url={url} />
+          <OrbitControls
+            enableDamping
+            dampingFactor={0.08}
+            minDistance={1}
+            maxDistance={30}
+          />
+        </Canvas>
+      </CanvasErrorBoundary>
 
       <button
         type="button"
@@ -121,5 +134,3 @@ export default function SplatViewer({ url }: { url?: string | null }) {
     </div>
   );
 }
-
-useGLTF.preload?.("/sample-models/sample.glb");
