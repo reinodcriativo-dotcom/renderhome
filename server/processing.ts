@@ -65,10 +65,10 @@ export async function runMockProcessing(jobId: string): Promise<void> {
 
     const slug = space?.public_slug ?? generatePublicSlug();
 
-    // No MVP, viewer_url aponta para o modelo de exemplo público.
-    // Quando o pipeline real existir, isso vai apontar para o arquivo .splat
-    // gerado e salvo no storage.
-    const viewerUrl = "/sample-models/sample.glb";
+    // No MVP, viewer_url fica null para o viewer renderizar a cena
+    // placeholder procedural. Quando o pipeline real de Gaussian Splatting
+    // existir, isso passa a apontar para o .splat/.ply/.spz gerado no storage.
+    const viewerUrl: string | null = null;
 
     await supabase
       .from("processing_jobs")
@@ -76,7 +76,7 @@ export async function runMockProcessing(jobId: string): Promise<void> {
         status: "completed",
         progress: 100,
         completed_at: new Date().toISOString(),
-        output_assets: { viewer_url: viewerUrl, format: "glb" },
+        output_assets: { viewer_url: viewerUrl, format: "placeholder" },
       })
       .eq("id", jobId);
 

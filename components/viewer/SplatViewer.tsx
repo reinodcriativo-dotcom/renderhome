@@ -2,7 +2,23 @@
 
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, useGLTF, Bounds } from "@react-three/drei";
-import { Suspense, useRef, useState } from "react";
+import { Component, Suspense, useRef, useState, type ReactNode } from "react";
+
+class ModelErrorBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.warn("[viewer] model load failed, using placeholder", err);
+  }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
 
 /**
  * Viewer 3D do MVP.
@@ -77,9 +93,11 @@ export default function SplatViewer({ url }: { url?: string | null }) {
         <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
         <Suspense fallback={null}>
           {url ? (
-            <Bounds fit clip observe margin={1.2}>
-              <Model url={url} />
-            </Bounds>
+            <ModelErrorBoundary fallback={<PlaceholderRoom />}>
+              <Bounds fit clip observe margin={1.2}>
+                <Model url={url} />
+              </Bounds>
+            </ModelErrorBoundary>
           ) : (
             <PlaceholderRoom />
           )}
