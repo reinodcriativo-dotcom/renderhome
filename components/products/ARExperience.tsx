@@ -1,28 +1,49 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { formatPrice } from "@/lib/utils";
 
 /**
- * Versao "three" do MindAR. Inclui um helper MindARThree que gerencia
- * camera + canvas + scene three.js. ~385KB. Carregado via CDN para nao
- * inflar o bundle inicial do app.
+ * Tres.js e o GLTFLoader sao carregados dinamicamente do MESMO CDN que o
+ * MindAR (via import map declarado no layout). Isso garante que o MindAR
+ * e nosso codigo compartilhem a mesma instancia do three — caso contrario
+ * anchor.group (Group da copia do MindAR) e gltf.scene (Object3D da nossa
+ * copia) seriam classes diferentes incompativeis.
+ *
+ * webpackIgnore impede o webpack de tentar bundlar/resolver os specifiers.
+ * O import passa pro browser nativo, que segue o import map.
+ *
+ * Three 0.161 e a ultima versao que ainda exporta sRGBEncoding, que o
+ * mindar-image-three.prod.js (compilado contra three antigo) referencia.
  */
+type ThreeNS = typeof import("three");
+// drei nao expoe GLTFLoader em "three" diretamente; loader vem de addons.
+type GLTFResult = { scene: ThreeObject3D };
+interface GLTFLoaderInstance {
+  loadAsync(url: string): Promise<GLTFResult>;
+}
+interface GLTFLoaderCtor {
+  new (): GLTFLoaderInstance;
+}
+type ThreeObject3D = InstanceType<ThreeNS["Object3D"]>;
+type ThreeGroup = InstanceType<ThreeNS["Group"]>;
+type ThreeScene = InstanceType<ThreeNS["Scene"]>;
+type ThreeCamera = InstanceType<ThreeNS["Camera"]>;
+type ThreeRenderer = InstanceType<ThreeNS["WebGLRenderer"]>;
+
 const MINDAR_THREE_MODULE_URL =
   "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
 
 interface Anchor {
-  group: THREE.Group;
+  group: ThreeGroup;
   onTargetFound?: () => void;
   onTargetLost?: () => void;
 }
 
 interface MindARThreeInstance {
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.Camera;
+  renderer: ThreeRenderer;
+  scene: ThreeScene;
+  camera: ThreeCamera;
   start: () => Promise<void>;
   stop: () => void;
   addAnchor: (targetIndex: number) => Anchor;
@@ -38,22 +59,10 @@ interface MindARThreeCtor {
   }): MindARThreeInstance;
 }
 
-interface MindARWindow {
-  IMAGE?: {
-    MindARThree?: MindARThreeCtor;
-  };
-}
-
-declare global {
-  interface Window {
-    MINDAR?: MindARWindow;
-  }
-}
-
 async function loadMindARThree(): Promise<MindARThreeCtor> {
-  if (window.MINDAR?.IMAGE?.MindARThree) {
-    return window.MINDAR.IMAGE.MindARThree;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = window as any;
+  if (w.MINDAR?.IMAGE?.MindARThree) return w.MINDAR.IMAGE.MindARThree;
 
   await new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
@@ -77,23 +86,29 @@ async function loadMindARThree(): Promise<MindARThreeCtor> {
   });
 
   for (let i = 0; i < 60; i++) {
-    if (window.MINDAR?.IMAGE?.MindARThree) break;
+    if (w.MINDAR?.IMAGE?.MindARThree) break;
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  const ctor = window.MINDAR?.IMAGE?.MindARThree;
+  const ctor = w.MINDAR?.IMAGE?.MindARThree as MindARThreeCtor | undefined;
   if (!ctor) {
     throw new Error("MindAR carregou mas não expôs MindARThree");
   }
   return ctor;
 }
 
-/**
- * Normaliza o tamanho do modelo para caber em ~1 unidade (que e o
- * tamanho do marker no espaco MindAR). Centraliza horizontalmente e
- * apoia ligeiramente acima do plano do QR.
- */
-function fitModelToMarker(scene: THREE.Object3D) {
+async function loadThree(): Promise<ThreeNS> {
+  return (await import(/* webpackIgnore: true */ "three")) as ThreeNS;
+}
+
+async function loadGLTFLoader(): Promise<GLTFLoaderCtor> {
+  const mod = (await import(
+    /* webpackIgnore: true */ "three/addons/loaders/GLTFLoader.js"
+  )) as { GLTFLoader: GLTFLoaderCtor };
+  return mod.GLTFLoader;
+}
+
+function fitModelToMarker(THREE: ThreeNS, scene: ThreeObject3D) {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 0.0001);
@@ -138,12 +153,16 @@ export default function ARExperience({
 
     try {
       setStep("Carregando AR…");
-      const MindARThree = await loadMindARThree();
+      const [MindARThree, THREE, GLTFLoader] = await Promise.all([
+        loadMindARThree(),
+        loadThree(),
+        loadGLTFLoader(),
+      ]);
 
       setStep("Baixando modelo 3D…");
       const loader = new GLTFLoader();
       const gltf = await loader.loadAsync(modelUrl);
-      fitModelToMarker(gltf.scene);
+      fitModelToMarker(THREE, gltf.scene);
 
       setStep("Pedindo acesso à câmera…");
       const mindarThree = new MindARThree({
@@ -177,7 +196,6 @@ export default function ARExperience({
       console.error("[AR] failed to start", err);
       setError(msg);
       setPhase("error");
-      // Limpa parcialmente
       if (mindarRef.current) {
         try {
           mindarRef.current.stop();
@@ -223,8 +241,8 @@ export default function ARExperience({
             Iniciar realidade aumentada
           </button>
           <p className="text-xs text-muted max-w-xs">
-            O navegador vai pedir acesso à câmera. Depois aponte para o QR para
-            ver o produto 3D em cima dele.
+            O navegador vai pedir acesso à câmera. Depois aponte para o QR
+            para ver o produto 3D em cima dele.
           </p>
         </div>
       )}
@@ -232,7 +250,10 @@ export default function ARExperience({
       {phase === "loading" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-background/90">
           <div className="h-1.5 w-48 bg-zinc-800 rounded overflow-hidden mb-3">
-            <div className="h-full bg-primary animate-pulse" style={{ width: "50%" }} />
+            <div
+              className="h-full bg-primary animate-pulse"
+              style={{ width: "50%" }}
+            />
           </div>
           <p className="text-sm text-muted">{step}</p>
         </div>

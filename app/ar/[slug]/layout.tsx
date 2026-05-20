@@ -16,14 +16,17 @@
  * package.json exports do three, que o browser/CDN nao honra. Os arquivos
  * fisicos vivem em examples/jsm/.
  */
+// Three 0.161 e a ultima versao que ainda exporta sRGBEncoding (removido
+// no 0.162). O mindar-image-three.prod.js foi compilado contra Three
+// antigo e usa essa constante — por isso precisamos pinar aqui.
 const importMap = {
   imports: {
     three:
-      "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
     "three/addons/":
-      "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+      "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
     "three/":
-      "https://cdn.jsdelivr.net/npm/three@0.169.0/",
+      "https://cdn.jsdelivr.net/npm/three@0.161.0/",
   },
 };
 
