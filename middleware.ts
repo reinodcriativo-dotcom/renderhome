@@ -32,8 +32,7 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isAuthRoute = path === "/login" || path === "/register";
-  const isProtected =
-    path.startsWith("/spaces") || path === "/dashboard";
+  const isProtected = path.startsWith("/products");
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
@@ -44,7 +43,7 @@ export async function middleware(request: NextRequest) {
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone();
-    url.pathname = "/spaces";
+    url.pathname = "/products";
     url.search = "";
     return NextResponse.redirect(url);
   }
@@ -54,6 +53,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sample-models|view|api/public).*)",
+    // Roda em tudo menos assets do Next, favicon, a rota publica /ar/[slug]
+    // (visitantes sem login) e routes de API publicas.
+    "/((?!_next/static|_next/image|favicon.ico|ar/).*)",
   ],
 };

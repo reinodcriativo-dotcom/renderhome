@@ -62,7 +62,7 @@ export default function RegisterForm() {
       return;
     }
 
-    router.replace("/spaces");
+    router.replace("/products");
     router.refresh();
   }
 

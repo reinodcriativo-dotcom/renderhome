@@ -1,14 +1,6 @@
-export type SpaceStatus =
-  | "draft"
-  | "uploading"
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed";
+export type ProductStatus = "draft" | "ready" | "archived";
 
-export type JobStatus = "queued" | "processing" | "completed" | "failed";
-
-export type AssetType = "image" | "video" | "model" | "thumbnail" | "metadata";
+export type OverlayType = "text" | "price" | "badge";
 
 export type Json =
   | string
@@ -43,18 +35,24 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
-      spaces: {
+      products: {
         Row: {
           id: string;
           user_id: string;
           name: string;
           description: string | null;
-          address: string | null;
-          status: SpaceStatus;
+          price_cents: number | null;
+          currency: string;
+          model_url: string | null;
+          model_path: string | null;
+          model_size_bytes: number | null;
+          marker_url: string | null;
+          marker_path: string | null;
+          mind_file_url: string | null;
+          mind_file_path: string | null;
           public_slug: string | null;
           is_public: boolean;
-          thumbnail_url: string | null;
-          viewer_url: string | null;
+          status: ProductStatus;
           created_at: string;
           updated_at: string;
         };
@@ -63,89 +61,59 @@ export interface Database {
           user_id: string;
           name: string;
           description?: string | null;
-          address?: string | null;
-          status?: SpaceStatus;
+          price_cents?: number | null;
+          currency?: string;
+          model_url?: string | null;
+          model_path?: string | null;
+          model_size_bytes?: number | null;
+          marker_url?: string | null;
+          marker_path?: string | null;
+          mind_file_url?: string | null;
+          mind_file_path?: string | null;
           public_slug?: string | null;
           is_public?: boolean;
-          thumbnail_url?: string | null;
-          viewer_url?: string | null;
+          status?: ProductStatus;
           created_at?: string;
           updated_at?: string;
         };
-        Update: Partial<Database["public"]["Tables"]["spaces"]["Insert"]>;
+        Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
         Relationships: [];
       };
-      space_tags: {
+      product_overlays: {
         Row: {
           id: string;
-          space_id: string;
-          tag: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          space_id: string;
-          tag: string;
-          created_at?: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["space_tags"]["Insert"]>;
-        Relationships: [];
-      };
-      space_assets: {
-        Row: {
-          id: string;
-          space_id: string;
-          user_id: string;
-          type: AssetType;
-          file_url: string;
-          file_path: string;
-          mime_type: string | null;
-          size_bytes: number | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          space_id: string;
-          user_id: string;
-          type: AssetType;
-          file_url: string;
-          file_path: string;
-          mime_type?: string | null;
-          size_bytes?: number | null;
-          created_at?: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["space_assets"]["Insert"]>;
-        Relationships: [];
-      };
-      processing_jobs: {
-        Row: {
-          id: string;
-          space_id: string;
-          user_id: string;
-          status: JobStatus;
-          progress: number;
-          error_message: string | null;
-          input_assets: Json | null;
-          output_assets: Json | null;
+          product_id: string;
+          type: OverlayType;
+          content: string;
+          position_x: number;
+          position_y: number;
+          position_z: number;
+          rotation_y: number;
+          scale: number;
+          color: string;
+          background_color: string;
+          order_index: number;
           created_at: string;
           updated_at: string;
-          completed_at: string | null;
         };
         Insert: {
           id?: string;
-          space_id: string;
-          user_id: string;
-          status?: JobStatus;
-          progress?: number;
-          error_message?: string | null;
-          input_assets?: Json | null;
-          output_assets?: Json | null;
+          product_id: string;
+          type: OverlayType;
+          content: string;
+          position_x?: number;
+          position_y?: number;
+          position_z?: number;
+          rotation_y?: number;
+          scale?: number;
+          color?: string;
+          background_color?: string;
+          order_index?: number;
           created_at?: string;
           updated_at?: string;
-          completed_at?: string | null;
         };
         Update: Partial<
-          Database["public"]["Tables"]["processing_jobs"]["Insert"]
+          Database["public"]["Tables"]["product_overlays"]["Insert"]
         >;
         Relationships: [];
       };

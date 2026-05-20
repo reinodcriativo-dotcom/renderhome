@@ -9,7 +9,7 @@ import { loginSchema } from "@/lib/validators";
 export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirectTo = params.get("redirect") || "/spaces";
+  const redirectTo = params.get("redirect") || "/products";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
