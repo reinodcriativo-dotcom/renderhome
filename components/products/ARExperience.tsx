@@ -188,6 +188,9 @@ export default function ARExperience({
   const cameraRef = useRef<ThreeCamera | null>(null);
   const anchorRef = useRef<Anchor | null>(null);
   const modelHolderRef = useRef<ThreeGroup | null>(null);
+  // innerHolder fica DENTRO de modelHolder e segura a rotacao/escala
+  // controladas pelo usuario (drag + pinch). Sobrevive a trocas de modo.
+  const innerHolderRef = useRef<ThreeGroup | null>(null);
   // Modo lido pelo render loop a cada frame para atualizar a pose do
   // holder em screen mode (sem precisar reparentear na camera).
   const modeRef = useRef<ARMode>("marker");
@@ -251,11 +254,18 @@ export default function ARExperience({
       scene.add(ambient);
       scene.add(dir);
 
-      // O modelo vai dentro de um Group "holder" — nos podemos re-parentear
-      // esse holder entre anchor.group (marker mode), camera (screen mode) ou
-      // scene (world mode) para suportar os 3 modos AR.
+      // Estrutura em duas camadas:
+      //   modelHolder (transformacao de modo: anchor/scene/etc)
+      //     innerHolder (transformacao do usuario: rotacao Y + escala)
+      //       gltf.scene (modelo, ja com fitModelToMarker aplicado)
+      //
+      // Separar essas camadas garante que mudar de modo nao perde a
+      // rotacao/zoom que o usuario aplicou.
       const modelHolder = new THREE.Group();
-      modelHolder.add(gltf.scene);
+      const innerHolder = new THREE.Group();
+      modelHolder.add(innerHolder);
+      innerHolder.add(gltf.scene);
+
       const anchor = mindarThree.addAnchor(0);
       anchor.group.add(modelHolder);
       anchor.onTargetFound = () => {
@@ -264,32 +274,76 @@ export default function ARExperience({
       };
       anchor.onTargetLost = () => setPhase("scanning");
 
-      // Salva nas refs para os botoes de modo (marker/screen/world) lerem.
       threeRef.current = THREE;
       sceneRef.current = scene;
       cameraRef.current = camera;
       anchorRef.current = anchor;
       modelHolderRef.current = modelHolder;
+      innerHolderRef.current = innerHolder;
 
-      // Touch / pointer drag horizontal -> rotacao Y do modelo.
+      // ----- Multi-touch: 1 dedo = rotacao Y, 2 dedos = pinch zoom -----
       const container = containerRef.current;
+      const pointers = new Map<number, { x: number; y: number }>();
+      let pinch: { distance: number; scale: number } | null = null;
       let dragX: number | null = null;
+
+      function pinchDistance(): number {
+        const pts = Array.from(pointers.values());
+        if (pts.length < 2) return 0;
+        const a = pts[0];
+        const b = pts[1];
+        return Math.hypot(a.x - b.x, a.y - b.y);
+      }
+
       const onDown = (e: PointerEvent) => {
-        dragX = e.clientX;
-        container.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try {
+          container.setPointerCapture(e.pointerId);
+        } catch {
+          /* noop */
+        }
+        if (pointers.size === 2) {
+          pinch = {
+            distance: pinchDistance(),
+            scale: innerHolder.scale.x,
+          };
+          dragX = null;
+        } else if (pointers.size === 1) {
+          dragX = e.clientX;
+        }
       };
+
       const onMove = (e: PointerEvent) => {
-        if (dragX === null) return;
-        const dx = e.clientX - dragX;
-        modelHolder.rotation.y += dx * 0.01;
-        dragX = e.clientX;
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2 && pinch) {
+          const d = pinchDistance();
+          if (d > 0) {
+            const next = pinch.scale * (d / pinch.distance);
+            // Limites: 0.1x ate 20x do tamanho real para nao "perder" o
+            // modelo (escala minima muito pequena somindo, ou enorme).
+            const clamped = Math.max(0.1, Math.min(20, next));
+            innerHolder.scale.setScalar(clamped);
+          }
+        } else if (pointers.size === 1 && dragX !== null) {
+          const dx = e.clientX - dragX;
+          innerHolder.rotation.y += dx * 0.01;
+          dragX = e.clientX;
+        }
       };
+
       const onUp = (e: PointerEvent) => {
-        dragX = null;
+        pointers.delete(e.pointerId);
         try {
           container.releasePointerCapture(e.pointerId);
         } catch {
           /* noop */
+        }
+        if (pointers.size < 2) pinch = null;
+        if (pointers.size === 0) dragX = null;
+        if (pointers.size === 1) {
+          const p = Array.from(pointers.values())[0];
+          dragX = p?.x ?? null;
         }
       };
       container.style.touchAction = "none";
@@ -337,7 +391,20 @@ export default function ARExperience({
    *  - world : modelo congela onde estava o QR (snapshot da matrix mundial),
    *           voce anda em volta e ele permanece la
    */
-  function switchMode(next: ARMode) {
+  /**
+   * Estados externos dos botoes (UX):
+   * - "Seguir QR"     -> switchMode("marker")
+   * - "Fixar na tela" -> switchMode("world-from-anchor") congela onde
+   *                      o QR esta sendo rastreado nesse instante.
+   * - "Colocar aqui"  -> alterna grab/drop:
+   *      not grabbing -> switchMode("screen"): modelo cola na camera
+   *                      e voce move o celular para posicionar.
+   *      grabbing     -> switchMode("drop"): solta o modelo no mundo
+   *                      naquela pose (vira mode 'world' interno).
+   */
+  function switchMode(
+    next: "marker" | "world-from-anchor" | "screen" | "drop",
+  ) {
     const THREE = threeRef.current;
     const scene = sceneRef.current;
     const camera = cameraRef.current;
@@ -345,8 +412,6 @@ export default function ARExperience({
     const holder = modelHolderRef.current;
     if (!THREE || !scene || !camera || !anchor || !holder) return;
 
-    // Remove de qualquer pai antes de re-parentear.
-    if (holder.parent) holder.parent.remove(holder);
     holder.matrixAutoUpdate = true;
     holder.visible = true;
 
@@ -359,32 +424,31 @@ export default function ARExperience({
         : MODEL_FALLBACK_FRACTION;
 
     if (next === "marker") {
-      // Reset: anchor.group ira ditar a matriz do holder a cada frame.
+      if (holder.parent) holder.parent.remove(holder);
       holder.position.set(0, 0, 0);
       holder.quaternion.identity();
       holder.scale.setScalar(1);
       anchor.group.add(holder);
+      modeRef.current = "marker";
+      setMode("marker");
     } else if (next === "screen") {
-      // Distancia confortavel para o modelo ocupar ~70% da menor dimensao
-      // visivel (geralmente a altura no celular). camera.fov esta em
-      // graus em PerspectiveCamera.
+      if (holder.parent) holder.parent.remove(holder);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fovDeg = (camera as any).fov ?? 50;
       const fovRad = (fovDeg * Math.PI) / 180;
       const distance =
         maxDimUnits / (2 * Math.tan(fovRad / 2) * 0.7);
       screenDistanceRef.current = Math.max(distance, 0.3);
-      // Coloca no scene root e a pose e atualizada por frame pelo render
-      // loop (em vez de reparentear na camera, que pode ter problemas
-      // de scene graph com a MindAR).
       holder.position.copy(camera.position);
       holder.quaternion.copy(camera.quaternion);
       holder.scale.setScalar(1);
       scene.add(holder);
-    } else if (next === "world") {
-      // Snapshot da pose mundial do anchor no momento atual. Decompondo
-      // em position/quaternion/scale e mais robusto que copiar a matriz
-      // crua com matrixAutoUpdate=false (que tem casos de borda chatos).
+      modeRef.current = "screen";
+      setMode("screen");
+    } else if (next === "world-from-anchor") {
+      if (holder.parent) holder.parent.remove(holder);
+      // Snapshot da pose mundial do anchor no momento atual (decompondo
+      // em pos/quat/scale, mais robusto que copiar matrix raw).
       anchor.group.updateMatrixWorld(true);
       const pos = new THREE.Vector3();
       const quat = new THREE.Quaternion();
@@ -394,10 +458,20 @@ export default function ARExperience({
       holder.quaternion.copy(quat);
       holder.scale.copy(scl);
       scene.add(holder);
+      modeRef.current = "world";
+      setMode("world");
+    } else if (next === "drop") {
+      // O holder ja esta no scene (screen mode) na pose seguindo a camera.
+      // Soltar = parar de atualizar no render loop. Pose final = onde o
+      // holder esta agora. Garantimos que esta no scene caso algo tenha
+      // mudado.
+      if (holder.parent !== scene) {
+        if (holder.parent) holder.parent.remove(holder);
+        scene.add(holder);
+      }
+      modeRef.current = "world";
+      setMode("world");
     }
-
-    modeRef.current = next;
-    setMode(next);
   }
 
   useEffect(() => {
@@ -580,24 +654,12 @@ export default function ARExperience({
             </button>
             <button
               type="button"
-              onClick={() => switchMode("screen")}
-              className={
-                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
-                (mode === "screen"
-                  ? "bg-primary text-white"
-                  : "text-white/80 hover:text-white")
-              }
-            >
-              Fixar na tela
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode("world")}
+              onClick={() => switchMode("world-from-anchor")}
               disabled={phase !== "tracking"}
               title={
                 phase !== "tracking"
                   ? "Aponte para o QR primeiro"
-                  : "Congela o produto onde o QR está"
+                  : "Congela o produto onde o QR está. Use 2 dedos para ajustar o tamanho."
               }
               className={
                 "px-3 py-2 rounded-full text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
@@ -606,7 +668,26 @@ export default function ARExperience({
                   : "text-white/80 hover:text-white")
               }
             >
-              Colocar aqui
+              Fixar na tela
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                switchMode(mode === "screen" ? "drop" : "screen")
+              }
+              title={
+                mode === "screen"
+                  ? "Solta o produto na posição atual"
+                  : "Pega o produto: ele vai seguir a câmera. Posicione e clique de novo para soltar."
+              }
+              className={
+                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
+                (mode === "screen"
+                  ? "bg-amber-500 text-black"
+                  : "text-white/80 hover:text-white")
+              }
+            >
+              {mode === "screen" ? "Soltar" : "Colocar aqui"}
             </button>
           </div>
         </div>
@@ -652,8 +733,9 @@ export default function ARExperience({
                   </div>
                 )
               ) : mode === "screen" ? (
-                <div className="inline-flex items-center gap-1.5 text-[10px] text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                  Fixo na tela
+                <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
+                  Segurando
                 </div>
               ) : (
                 <div className="inline-flex items-center gap-1.5 text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/30 px-2 py-1 rounded-full whitespace-nowrap">
@@ -662,20 +744,10 @@ export default function ARExperience({
               )}
             </div>
 
-            <p className="text-[11px] text-white/60 mt-2 flex items-center gap-1.5">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="w-3.5 h-3.5 shrink-0"
-              >
-                <path
-                  d="M7 12a5 5 0 1 1 10 0M12 7v10M7 12l-2-2M17 12l2-2"
-                  strokeLinecap="round"
-                />
-              </svg>
-              Arraste o dedo na tela para girar o produto
+            <p className="text-[11px] text-white/60 mt-2 leading-snug">
+              {mode === "screen"
+                ? "Mire o celular onde quiser colocar e toque em Soltar."
+                : "Arraste com 1 dedo para girar · pinçada de 2 dedos para zoom."}
             </p>
           </div>
         </div>
