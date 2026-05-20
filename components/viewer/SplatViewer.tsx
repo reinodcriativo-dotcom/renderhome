@@ -1,8 +1,9 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, useGLTF, Bounds } from "@react-three/drei";
-import { Component, Suspense, useRef, useState, type ReactNode } from "react";
+import { OrbitControls } from "@react-three/drei";
+import { Component, useRef, useState, type ReactNode } from "react";
+import RealSplatViewer from "./RealSplatViewer";
 
 class CanvasErrorBoundary extends Component<
   { children: ReactNode; fallback: ReactNode },
@@ -21,18 +22,20 @@ class CanvasErrorBoundary extends Component<
 }
 
 /**
- * Viewer 3D do MVP.
- *
- * Atualmente renderiza um arquivo .glb (modelo de exemplo) com OrbitControls.
- * Quando o pipeline de Gaussian Splatting estiver pronto, basta trocar o
- * componente abaixo por um <SplatScene url={...} /> que carrega .splat/.ply/.spz.
+ * Heuristica para detectar se uma URL aponta para um arquivo Gaussian Splat
+ * suportado pelo viewer real (@mkkellogg/gaussian-splats-3d).
  */
-function Model({ url }: { url: string }) {
-  const { scene } = useGLTF(url);
-  return <primitive object={scene} />;
+function isSplatUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const path = url.split("?")[0].toLowerCase();
+  return (
+    path.endsWith(".ply") ||
+    path.endsWith(".splat") ||
+    path.endsWith(".ksplat")
+  );
 }
 
-function PlaceholderRoom() {
+function PlaceholderScene() {
   return (
     <group>
       {/* chão */}
@@ -45,7 +48,7 @@ function PlaceholderRoom() {
         <planeGeometry args={[10, 5]} />
         <meshStandardMaterial color="#3f3f46" />
       </mesh>
-      {/* móvel */}
+      {/* móveis */}
       <mesh position={[-1.5, -0.25, -1]}>
         <boxGeometry args={[1.5, 1.5, 1]} />
         <meshStandardMaterial color="#8b5cf6" />
@@ -62,16 +65,25 @@ function PlaceholderRoom() {
   );
 }
 
-function Scene({ url }: { url?: string | null }) {
-  if (!url) return <PlaceholderRoom />;
+function PlaceholderCanvas() {
   return (
-    <CanvasErrorBoundary fallback={<PlaceholderRoom />}>
-      <Suspense fallback={<PlaceholderRoom />}>
-        <Bounds fit clip observe margin={1.2}>
-          <Model url={url} />
-        </Bounds>
-      </Suspense>
-    </CanvasErrorBoundary>
+    <Canvas
+      shadows
+      camera={{ position: [4, 3, 6], fov: 50 }}
+      gl={{ antialias: true }}
+    >
+      <color attach="background" args={["#0a0a0a"]} />
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
+      <directionalLight position={[-5, 6, -3]} intensity={0.4} />
+      <PlaceholderScene />
+      <OrbitControls
+        enableDamping
+        dampingFactor={0.08}
+        minDistance={1}
+        maxDistance={30}
+      />
+    </Canvas>
   );
 }
 
@@ -86,6 +98,9 @@ function ViewerFallback() {
 export default function SplatViewer({ url }: { url?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [splatFailed, setSplatFailed] = useState(false);
+
+  const showRealSplat = isSplatUrl(url) && !splatFailed;
 
   async function toggleFullscreen() {
     const el = containerRef.current;
@@ -105,29 +120,20 @@ export default function SplatViewer({ url }: { url?: string | null }) {
       className="relative w-full h-[60vh] sm:h-[70vh] bg-zinc-950 rounded-xl overflow-hidden border border-border"
     >
       <CanvasErrorBoundary fallback={<ViewerFallback />}>
-        <Canvas
-          shadows
-          camera={{ position: [4, 3, 6], fov: 50 }}
-          gl={{ antialias: true }}
-        >
-          <color attach="background" args={["#0a0a0a"]} />
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
-          <directionalLight position={[-5, 6, -3]} intensity={0.4} />
-          <Scene url={url} />
-          <OrbitControls
-            enableDamping
-            dampingFactor={0.08}
-            minDistance={1}
-            maxDistance={30}
+        {showRealSplat && url ? (
+          <RealSplatViewer
+            url={url}
+            onError={() => setSplatFailed(true)}
           />
-        </Canvas>
+        ) : (
+          <PlaceholderCanvas />
+        )}
       </CanvasErrorBoundary>
 
       <button
         type="button"
         onClick={toggleFullscreen}
-        className="absolute top-3 right-3 btn btn-secondary text-xs"
+        className="absolute top-3 right-3 btn btn-secondary text-xs z-10"
       >
         {isFullscreen ? "Sair tela cheia" : "Tela cheia"}
       </button>
