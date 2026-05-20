@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RenderEstate 3D",
+  title: "RenderAR — Catálogo 3D em realidade aumentada",
   description:
-    "Capture e compartilhe ambientes 3D de imóveis direto do seu celular.",
+    "Suba modelos 3D dos seus produtos, gere QR codes e seus clientes visualizam em AR direto da câmera.",
 };
 
 export const viewport: Viewport = {

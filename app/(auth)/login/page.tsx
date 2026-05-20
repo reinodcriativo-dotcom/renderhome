@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import LoginForm from "@/components/auth/LoginForm";
 
-export const metadata = { title: "Entrar — RenderEstate 3D" };
+export const metadata = { title: "Entrar — RenderAR" };
 
 export default function LoginPage() {
   return (
@@ -9,7 +9,7 @@ export default function LoginPage() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Entrar</h1>
         <p className="text-sm text-muted">
-          Acesse seus espaços e capturas 3D.
+          Acesse seu catálogo de produtos em AR.
         </p>
       </div>
       <Suspense fallback={null}>

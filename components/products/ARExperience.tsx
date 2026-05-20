@@ -188,6 +188,12 @@ export default function ARExperience({
   const cameraRef = useRef<ThreeCamera | null>(null);
   const anchorRef = useRef<Anchor | null>(null);
   const modelHolderRef = useRef<ThreeGroup | null>(null);
+  // Modo lido pelo render loop a cada frame para atualizar a pose do
+  // holder em screen mode (sem precisar reparentear na camera).
+  const modeRef = useRef<ARMode>("marker");
+  // Distancia camera->modelo no screen mode, calculada uma vez para o
+  // modelo caber confortavelmente na tela.
+  const screenDistanceRef = useRef<number>(1.5);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [step, setStep] = useState<string>("");
@@ -295,7 +301,19 @@ export default function ARExperience({
       await mindarThree.start();
       setPhase("scanning");
 
-      renderer.setAnimationLoop(() => renderer.render(scene, camera));
+      // No screen mode, atualizamos a pose do holder a cada frame
+      // para seguir a camera, em vez de reparentea-lo (mais robusto).
+      const forwardVec = new THREE.Vector3();
+      renderer.setAnimationLoop(() => {
+        if (modeRef.current === "screen" && modelHolderRef.current) {
+          forwardVec.set(0, 0, -1).applyQuaternion(camera.quaternion);
+          modelHolderRef.current.position
+            .copy(camera.position)
+            .addScaledVector(forwardVec, screenDistanceRef.current);
+          modelHolderRef.current.quaternion.copy(camera.quaternion);
+        }
+        renderer.render(scene, camera);
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro desconhecido";
       console.error("[AR] failed to start", err);
@@ -329,34 +347,56 @@ export default function ARExperience({
 
     // Remove de qualquer pai antes de re-parentear.
     if (holder.parent) holder.parent.remove(holder);
+    holder.matrixAutoUpdate = true;
+    holder.visible = true;
+
+    // Tamanho local do modelo em unidades MindAR: o gltf.scene dentro do
+    // holder ja foi escalado por fitModelToMarker (physicalMaxCm /
+    // markerWidthCm, ou fallback 0.6).
+    const maxDimUnits =
+      physicalMaxCm && markerWidthCm > 0
+        ? physicalMaxCm / markerWidthCm
+        : MODEL_FALLBACK_FRACTION;
 
     if (next === "marker") {
-      // Reset de pose: o anchor ditara matrix do holder a cada frame.
+      // Reset: anchor.group ira ditar a matriz do holder a cada frame.
       holder.position.set(0, 0, 0);
       holder.quaternion.identity();
-      holder.matrixAutoUpdate = true;
+      holder.scale.setScalar(1);
       anchor.group.add(holder);
     } else if (next === "screen") {
-      // 1 unidade = largura do QR. ~1.5 unidades a frente da camera fica
-      // confortavel para ver o produto inteiro na tela.
-      holder.position.set(0, 0, -1.5);
-      holder.quaternion.identity();
-      holder.matrixAutoUpdate = true;
-      camera.add(holder);
-      if (!scene.children.includes(camera as unknown as ThreeObject3D)) {
-        // Em alguns setups da MindAR a camera nao e filha da scene; garantir.
-        scene.add(camera as unknown as ThreeObject3D);
-      }
+      // Distancia confortavel para o modelo ocupar ~70% da menor dimensao
+      // visivel (geralmente a altura no celular). camera.fov esta em
+      // graus em PerspectiveCamera.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fovDeg = (camera as any).fov ?? 50;
+      const fovRad = (fovDeg * Math.PI) / 180;
+      const distance =
+        maxDimUnits / (2 * Math.tan(fovRad / 2) * 0.7);
+      screenDistanceRef.current = Math.max(distance, 0.3);
+      // Coloca no scene root e a pose e atualizada por frame pelo render
+      // loop (em vez de reparentear na camera, que pode ter problemas
+      // de scene graph com a MindAR).
+      holder.position.copy(camera.position);
+      holder.quaternion.copy(camera.quaternion);
+      holder.scale.setScalar(1);
+      scene.add(holder);
     } else if (next === "world") {
-      // Snapshot da matriz mundial do anchor no momento atual; o modelo
-      // fica fixo nesse ponto no mundo (relativo ao marker como origem).
+      // Snapshot da pose mundial do anchor no momento atual. Decompondo
+      // em position/quaternion/scale e mais robusto que copiar a matriz
+      // crua com matrixAutoUpdate=false (que tem casos de borda chatos).
       anchor.group.updateMatrixWorld(true);
-      const m = new THREE.Matrix4().copy(anchor.group.matrixWorld);
-      holder.matrixAutoUpdate = false;
-      holder.matrix.copy(m);
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scl = new THREE.Vector3();
+      anchor.group.matrixWorld.decompose(pos, quat, scl);
+      holder.position.copy(pos);
+      holder.quaternion.copy(quat);
+      holder.scale.copy(scl);
       scene.add(holder);
     }
 
+    modeRef.current = next;
     setMode(next);
   }
 

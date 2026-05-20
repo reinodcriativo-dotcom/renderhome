@@ -1,6 +1,6 @@
 import RegisterForm from "@/components/auth/RegisterForm";
 
-export const metadata = { title: "Criar conta — RenderEstate 3D" };
+export const metadata = { title: "Criar conta — RenderAR" };
 
 export default function RegisterPage() {
   return (
@@ -8,7 +8,7 @@ export default function RegisterPage() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Criar conta</h1>
         <p className="text-sm text-muted">
-          Comece a capturar ambientes 3D em minutos.
+          Crie seu catálogo de produtos em AR em minutos.
         </p>
       </div>
       <RegisterForm />
