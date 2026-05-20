@@ -7,12 +7,16 @@ import { env } from "@/lib/env";
 import { generateQrPng, buildQrTargetUrl } from "@/lib/qr";
 
 /**
- * Carrega o compilador MindAR via CDN para nao inflar o bundle do dashboard
- * (a lib traz TensorFlow.js junto, ~2MB). Cache: o navegador reusa entre
- * publicacoes.
+ * Carrega o MindAR (com Compiler) via CDN como ES module dinamico, para
+ * nao inflar o bundle do dashboard (a lib traz TensorFlow.js junto, ~2MB).
+ * Cache: o navegador reusa entre publicacoes.
+ *
+ * Em mind-ar 1.2.5, o Compiler vive dentro de mindar-image.prod.js (nao ha
+ * arquivo compiler-only). O modulo expoe window.MINDAR.IMAGE.Compiler como
+ * side effect ao importar.
  */
-const MINDAR_CDN =
-  "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-compiler.prod.js";
+const MINDAR_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js";
 
 interface MindARGlobal {
   IMAGE: {
@@ -34,23 +38,39 @@ declare global {
 
 async function loadMindAR(): Promise<MindARGlobal> {
   if (typeof window !== "undefined" && window.MINDAR) return window.MINDAR;
+
   await new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${MINDAR_CDN}"]`,
+      `script[data-mindar="1"]`,
     );
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("Falha ao carregar MindAR")));
+      existing.addEventListener("error", () =>
+        reject(new Error("Falha ao carregar MindAR do CDN")),
+      );
       return;
     }
     const script = document.createElement("script");
-    script.src = MINDAR_CDN;
-    script.async = true;
+    script.type = "module";
+    script.src = MINDAR_MODULE_URL;
+    script.dataset.mindar = "1";
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Falha ao carregar MindAR"));
+    script.onerror = () =>
+      reject(new Error("Falha ao carregar MindAR do CDN"));
     document.head.appendChild(script);
   });
-  if (!window.MINDAR) throw new Error("MindAR nao expos a global esperada");
+
+  if (!window.MINDAR) {
+    // Em alguns navegadores o evento load do <script type=module> dispara antes
+    // do top-level await terminar de executar; faz polling curto como rede.
+    for (let i = 0; i < 50; i++) {
+      if (window.MINDAR) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  if (!window.MINDAR) {
+    throw new Error("MindAR carregou mas não expôs window.MINDAR");
+  }
   return window.MINDAR;
 }
 
