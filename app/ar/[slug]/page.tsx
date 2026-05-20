@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase-server";
+import {
+  createClient,
+  createServiceClient,
+} from "@/lib/supabase-server";
+import { env } from "@/lib/env";
 import { formatPrice } from "@/lib/utils";
 import ARExperience from "@/components/products/ARExperience";
 
@@ -39,7 +43,7 @@ export default async function ARPage({
   const { data: product } = await supabase
     .from("products")
     .select(
-      "id, name, description, price_cents, currency, model_url, mind_file_url, is_public, status",
+      "id, name, description, price_cents, currency, model_url, model_path, mind_file_url, mind_file_path, is_public, status",
     )
     .eq("public_slug", slug)
     .single();
@@ -48,8 +52,27 @@ export default async function ARPage({
     notFound();
   }
 
-  // Se faltar modelo ou arquivo de tracking, mostramos fallback informativo.
-  const canRender = !!product.model_url && !!product.mind_file_url;
+  // Geramos signed URLs (1h) com service_role para servir os assets ao
+  // visitante anonimo sem depender de policies de read publico no Storage
+  // — comprovadamente menos confiavel que signed URLs.
+  const service = createServiceClient();
+  let modelSignedUrl: string | null = null;
+  let mindSignedUrl: string | null = null;
+
+  if (product.model_path) {
+    const { data: m } = await service.storage
+      .from(env.SUPABASE_BUCKET)
+      .createSignedUrl(product.model_path, 3600);
+    modelSignedUrl = m?.signedUrl ?? null;
+  }
+  if (product.mind_file_path) {
+    const { data: m } = await service.storage
+      .from(env.SUPABASE_BUCKET)
+      .createSignedUrl(product.mind_file_path, 3600);
+    mindSignedUrl = m?.signedUrl ?? null;
+  }
+
+  const canRender = !!modelSignedUrl && !!mindSignedUrl;
 
   if (!canRender) {
     return (
@@ -86,8 +109,8 @@ export default async function ARPage({
 
   return (
     <ARExperience
-      modelUrl={product.model_url}
-      mindFileUrl={product.mind_file_url}
+      modelUrl={modelSignedUrl!}
+      mindFileUrl={mindSignedUrl!}
       productName={product.name}
       priceCents={product.price_cents}
       currency={product.currency}
