@@ -1,39 +1,36 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, AssetType } from "@/types/database";
+import type { Database } from "@/types/database";
 import { env } from "./env";
 
-export function buildAssetPath(
+/**
+ * Caminho no bucket: <user_id>/<product_id>/<filename>
+ * O prefixo garante que as RLS policies (que usam storage.foldername(name))
+ * funcionem corretamente para isolar arquivos por usuario.
+ */
+export function buildModelPath(
   userId: string,
-  spaceId: string,
+  productId: string,
   filename: string,
 ): string {
   const safe = filename.replace(/[^\w.\-]/g, "_");
-  return `${userId}/${spaceId}/${Date.now()}_${safe}`;
+  return `${userId}/${productId}/${Date.now()}_${safe}`;
 }
 
-export function inferAssetType(mime: string | null | undefined): AssetType {
-  if (!mime) return "metadata";
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime === "application/octet-stream") return "model";
-  return "metadata";
-}
-
-export async function uploadAsset(
+export async function uploadModel(
   supabase: SupabaseClient<Database>,
   params: {
     userId: string;
-    spaceId: string;
+    productId: string;
     file: File;
   },
 ): Promise<{ path: string; publicUrl: string }> {
-  const path = buildAssetPath(params.userId, params.spaceId, params.file.name);
+  const path = buildModelPath(params.userId, params.productId, params.file.name);
   const { error } = await supabase.storage
     .from(env.SUPABASE_BUCKET)
     .upload(path, params.file, {
       cacheControl: "3600",
       upsert: false,
-      contentType: params.file.type || undefined,
+      contentType: params.file.type || "model/gltf-binary",
     });
   if (error) throw error;
 
@@ -52,4 +49,11 @@ export function getPublicUrl(
     .from(env.SUPABASE_BUCKET)
     .getPublicUrl(path);
   return data.publicUrl;
+}
+
+export async function deleteFile(
+  supabase: SupabaseClient<Database>,
+  path: string,
+): Promise<void> {
+  await supabase.storage.from(env.SUPABASE_BUCKET).remove([path]);
 }

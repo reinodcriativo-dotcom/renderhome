@@ -17,35 +17,41 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Informe a senha"),
 });
 
-export const spaceSchema = z.object({
-  name: z.string().min(1, "Informe um nome").max(120),
+export const productSchema = z.object({
+  name: z.string().min(1, "Informe o nome do produto").max(120),
   description: z.string().max(2000).optional().nullable(),
-  address: z.string().max(255).optional().nullable(),
+  price_cents: z
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional(),
+  currency: z.string().length(3).optional(),
   is_public: z.boolean().optional(),
-  tags: z.array(z.string().min(1).max(40)).optional(),
+  status: z.enum(["draft", "ready", "archived"]).optional(),
+});
+
+export const overlaySchema = z.object({
+  type: z.enum(["text", "price", "badge"]),
+  content: z.string().min(1).max(200),
+  position_x: z.number().optional(),
+  position_y: z.number().optional(),
+  position_z: z.number().optional(),
+  rotation_y: z.number().optional(),
+  scale: z.number().positive().optional(),
+  color: z.string().optional(),
+  background_color: z.string().optional(),
+  order_index: z.number().int().optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
-export type SpaceInput = z.infer<typeof spaceSchema>;
+export type ProductInput = z.infer<typeof productSchema>;
+export type OverlayInput = z.infer<typeof overlaySchema>;
 
-export const ALLOWED_IMAGE_MIME = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-];
-export const ALLOWED_VIDEO_MIME = [
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
-];
+export const ALLOWED_MODEL_EXTENSIONS = [".glb", ".gltf"];
 
-export function isAllowedCaptureFile(file: File): boolean {
-  return (
-    ALLOWED_IMAGE_MIME.includes(file.type) ||
-    ALLOWED_VIDEO_MIME.includes(file.type) ||
-    file.type.startsWith("image/") ||
-    file.type.startsWith("video/")
-  );
+export function isAllowedModelFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return ALLOWED_MODEL_EXTENSIONS.some((ext) => name.endsWith(ext));
 }
