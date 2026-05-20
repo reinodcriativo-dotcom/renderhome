@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
 import { requireUser } from "@/lib/auth";
 import ProductForm from "@/components/products/ProductForm";
+import type { Product } from "@/types/product";
 
 export const dynamic = "force-dynamic";
 
@@ -15,30 +16,31 @@ export default async function EditProductPage({
   const user = await requireUser();
   const supabase = await createClient();
 
-  const { data: product } = await supabase
+  const { data } = await supabase
     .from("products")
     .select("*")
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
 
-  if (!product) notFound();
+  if (!data) notFound();
+  const product = data as Product;
 
   return (
-    <div className="max-w-xl mx-auto space-y-6">
-      <div>
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className="space-y-2">
         <Link
           href={`/products/${id}`}
-          className="text-sm text-muted hover:text-foreground"
+          className="text-sm text-muted hover:text-foreground inline-flex items-center gap-1"
         >
           ← Voltar
         </Link>
-        <h1 className="text-xl sm:text-2xl font-semibold mt-2">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
           Editar produto
         </h1>
       </div>
 
-      <div className="card p-5 sm:p-6">
+      <div className="card p-5 sm:p-7">
         <ProductForm
           mode="edit"
           initial={{
