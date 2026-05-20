@@ -43,6 +43,12 @@ export async function PATCH(
     "description",
     "price_cents",
     "currency",
+    "category",
+    "size_label",
+    "dim_length_cm",
+    "dim_width_cm",
+    "dim_height_cm",
+    "marker_width_cm",
     "is_public",
     "status",
   ] as const) {

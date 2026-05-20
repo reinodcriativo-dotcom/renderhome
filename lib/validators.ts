@@ -27,6 +27,14 @@ export const productSchema = z.object({
     .nullable()
     .optional(),
   currency: z.string().length(3).optional(),
+  category: z
+    .enum(["tenis", "camiseta", "bone", "relogio", "custom"])
+    .optional(),
+  size_label: z.string().max(40).optional().nullable(),
+  dim_length_cm: z.number().positive().max(500).optional().nullable(),
+  dim_width_cm: z.number().positive().max(500).optional().nullable(),
+  dim_height_cm: z.number().positive().max(500).optional().nullable(),
+  marker_width_cm: z.number().positive().max(200).optional(),
   is_public: z.boolean().optional(),
   status: z.enum(["draft", "ready", "archived"]).optional(),
 });

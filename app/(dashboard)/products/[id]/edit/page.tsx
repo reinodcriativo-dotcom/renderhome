@@ -47,6 +47,12 @@ export default async function EditProductPage({
             description: product.description,
             price_cents: product.price_cents,
             currency: product.currency,
+            category: product.category,
+            size_label: product.size_label,
+            dim_length_cm: product.dim_length_cm,
+            dim_width_cm: product.dim_width_cm,
+            dim_height_cm: product.dim_height_cm,
+            marker_width_cm: product.marker_width_cm,
             is_public: product.is_public,
           }}
         />

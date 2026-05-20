@@ -43,7 +43,7 @@ export default async function ARPage({
   const { data: product } = await supabase
     .from("products")
     .select(
-      "id, name, description, price_cents, currency, model_url, model_path, mind_file_url, mind_file_path, is_public, status",
+      "id, name, description, price_cents, currency, category, size_label, dim_length_cm, dim_width_cm, dim_height_cm, marker_width_cm, model_url, model_path, mind_file_url, mind_file_path, is_public, status",
     )
     .eq("public_slug", slug)
     .single();
@@ -107,6 +107,16 @@ export default async function ARPage({
     );
   }
 
+  // Maior dimensao fisica em cm — usada para escalar o modelo em AR.
+  // Se nenhuma das tres foi informada, deixamos null para que o
+  // ARExperience use o fallback (60% da largura do marker).
+  const dims = [
+    product.dim_length_cm,
+    product.dim_width_cm,
+    product.dim_height_cm,
+  ].filter((v): v is number => typeof v === "number" && v > 0);
+  const physicalMaxCm = dims.length > 0 ? Math.max(...dims) : null;
+
   return (
     <ARExperience
       modelUrl={modelSignedUrl!}
@@ -114,6 +124,9 @@ export default async function ARPage({
       productName={product.name}
       priceCents={product.price_cents}
       currency={product.currency}
+      sizeLabel={product.size_label ?? null}
+      physicalMaxCm={physicalMaxCm}
+      markerWidthCm={product.marker_width_cm ?? 10}
     />
   );
 }

@@ -21,7 +21,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const { name, description, price_cents, currency, is_public } = parsed.data;
+  const {
+    name,
+    description,
+    price_cents,
+    currency,
+    is_public,
+    category,
+    size_label,
+    dim_length_cm,
+    dim_width_cm,
+    dim_height_cm,
+    marker_width_cm,
+  } = parsed.data;
 
   const { data: product, error } = await supabase
     .from("products")
@@ -31,6 +43,12 @@ export async function POST(request: Request) {
       description: description ?? null,
       price_cents: price_cents ?? null,
       currency: currency ?? "BRL",
+      category: category ?? "custom",
+      size_label: size_label ?? null,
+      dim_length_cm: dim_length_cm ?? null,
+      dim_width_cm: dim_width_cm ?? null,
+      dim_height_cm: dim_height_cm ?? null,
+      marker_width_cm: marker_width_cm ?? 10,
       is_public: is_public ?? true,
       public_slug: generatePublicSlug(),
       status: "draft",

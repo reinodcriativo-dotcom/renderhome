@@ -116,17 +116,35 @@ async function loadGLTFLoader(): Promise<GLTFLoaderCtor> {
 }
 
 /**
- * Normaliza o tamanho do modelo para ~60% da largura do marker (1 unidade
- * = largura do QR no espaco MindAR). Centraliza e apoia ligeiramente
- * acima do plano do QR para nao ficar embutido.
+ * Escala o modelo ao tamanho FISICO real (em cm) relativo ao QR impresso.
+ *
+ * No espaco MindAR, 1 unidade = largura do marker. Se o QR e impresso
+ * com X cm de largura e o produto tem Y cm na maior dimensao, o modelo
+ * deve ter Y/X unidades MindAR.
+ *
+ * Se physicalMaxCm for nulo (lojista nao informou medidas), caimos no
+ * fallback de 60% da largura do marker.
+ *
+ * Tambem centraliza o modelo horizontalmente e o apoia ligeiramente
+ * acima do plano do QR (Y +0.05).
  */
-const MODEL_FIT_FRACTION = 0.6;
+const MODEL_FALLBACK_FRACTION = 0.6;
 
-function fitModelToMarker(THREE: ThreeNS, scene: ThreeObject3D) {
+function fitModelToMarker(
+  THREE: ThreeNS,
+  scene: ThreeObject3D,
+  opts: { physicalMaxCm: number | null; markerWidthCm: number },
+) {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 0.0001);
-  const scale = MODEL_FIT_FRACTION / maxDim;
+
+  const targetUnits =
+    opts.physicalMaxCm && opts.markerWidthCm > 0
+      ? opts.physicalMaxCm / opts.markerWidthCm
+      : MODEL_FALLBACK_FRACTION;
+
+  const scale = targetUnits / maxDim;
   scene.scale.setScalar(scale);
 
   const center = box.getCenter(new THREE.Vector3());
@@ -138,6 +156,7 @@ function fitModelToMarker(THREE: ThreeNS, scene: ThreeObject3D) {
 }
 
 type Phase = "idle" | "loading" | "scanning" | "tracking" | "error";
+type ARMode = "marker" | "screen" | "world";
 
 export default function ARExperience({
   modelUrl,
@@ -145,20 +164,39 @@ export default function ARExperience({
   productName,
   priceCents,
   currency,
+  sizeLabel,
+  physicalMaxCm,
+  markerWidthCm,
 }: {
   modelUrl: string;
   mindFileUrl: string;
   productName: string;
   priceCents: number | null;
   currency: string;
+  sizeLabel: string | null;
+  physicalMaxCm: number | null;
+  markerWidthCm: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindarRef = useRef<MindARThreeInstance | null>(null);
   const animRef = useRef<number | null>(null);
+  // Refs para conseguir mudar o pai do modelo entre anchor / camera / scene
+  // depois do startAR (e fora do escopo do try/catch).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const threeRef = useRef<ThreeNS | null>(null);
+  const sceneRef = useRef<ThreeScene | null>(null);
+  const cameraRef = useRef<ThreeCamera | null>(null);
+  const anchorRef = useRef<Anchor | null>(null);
+  const modelHolderRef = useRef<ThreeGroup | null>(null);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [step, setStep] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<ARMode>("marker");
+  // Flag de oferecer botoes: aparece depois que o QR foi rastreado
+  // pelo menos UMA vez na sessao (entao o usuario pode "fixar" ou "colocar
+  // aqui" sem precisar continuar segurando o QR).
+  const [hasTrackedOnce, setHasTrackedOnce] = useState(false);
 
   async function startAR() {
     if (!containerRef.current) return;
@@ -176,7 +214,10 @@ export default function ARExperience({
       setStep("Baixando modelo 3D…");
       const loader = new GLTFLoader();
       const gltf = await loader.loadAsync(modelUrl);
-      fitModelToMarker(THREE, gltf.scene);
+      fitModelToMarker(THREE, gltf.scene, {
+        physicalMaxCm,
+        markerWidthCm,
+      });
 
       setStep("Pedindo acesso à câmera…");
       const mindarThree = new MindARThree({
@@ -204,16 +245,25 @@ export default function ARExperience({
       scene.add(ambient);
       scene.add(dir);
 
-      // O modelo vai dentro de um Group "holder" para que possamos
-      // aplicar rotacao por dedo SEM mexer na rotacao do anchor (que
-      // segue o marker fisico). Resultado: anchor segue o QR no espaco,
-      // holder gira em Y conforme o usuario arrasta o dedo.
+      // O modelo vai dentro de um Group "holder" — nos podemos re-parentear
+      // esse holder entre anchor.group (marker mode), camera (screen mode) ou
+      // scene (world mode) para suportar os 3 modos AR.
       const modelHolder = new THREE.Group();
       modelHolder.add(gltf.scene);
       const anchor = mindarThree.addAnchor(0);
       anchor.group.add(modelHolder);
-      anchor.onTargetFound = () => setPhase("tracking");
+      anchor.onTargetFound = () => {
+        setPhase("tracking");
+        setHasTrackedOnce(true);
+      };
       anchor.onTargetLost = () => setPhase("scanning");
+
+      // Salva nas refs para os botoes de modo (marker/screen/world) lerem.
+      threeRef.current = THREE;
+      sceneRef.current = scene;
+      cameraRef.current = camera;
+      anchorRef.current = anchor;
+      modelHolderRef.current = modelHolder;
 
       // Touch / pointer drag horizontal -> rotacao Y do modelo.
       const container = containerRef.current;
@@ -262,6 +312,54 @@ export default function ARExperience({
     }
   }
 
+  /**
+   * Modos AR:
+   *  - marker: modelo fica dentro do anchor (segue QR fisico em tempo real)
+   *  - screen: modelo fica preso a camera (acompanha onde voce aponta)
+   *  - world : modelo congela onde estava o QR (snapshot da matrix mundial),
+   *           voce anda em volta e ele permanece la
+   */
+  function switchMode(next: ARMode) {
+    const THREE = threeRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const anchor = anchorRef.current;
+    const holder = modelHolderRef.current;
+    if (!THREE || !scene || !camera || !anchor || !holder) return;
+
+    // Remove de qualquer pai antes de re-parentear.
+    if (holder.parent) holder.parent.remove(holder);
+
+    if (next === "marker") {
+      // Reset de pose: o anchor ditara matrix do holder a cada frame.
+      holder.position.set(0, 0, 0);
+      holder.quaternion.identity();
+      holder.matrixAutoUpdate = true;
+      anchor.group.add(holder);
+    } else if (next === "screen") {
+      // 1 unidade = largura do QR. ~1.5 unidades a frente da camera fica
+      // confortavel para ver o produto inteiro na tela.
+      holder.position.set(0, 0, -1.5);
+      holder.quaternion.identity();
+      holder.matrixAutoUpdate = true;
+      camera.add(holder);
+      if (!scene.children.includes(camera as unknown as ThreeObject3D)) {
+        // Em alguns setups da MindAR a camera nao e filha da scene; garantir.
+        scene.add(camera as unknown as ThreeObject3D);
+      }
+    } else if (next === "world") {
+      // Snapshot da matriz mundial do anchor no momento atual; o modelo
+      // fica fixo nesse ponto no mundo (relativo ao marker como origem).
+      anchor.group.updateMatrixWorld(true);
+      const m = new THREE.Matrix4().copy(anchor.group.matrixWorld);
+      holder.matrixAutoUpdate = false;
+      holder.matrix.copy(m);
+      scene.add(holder);
+    }
+
+    setMode(next);
+  }
+
   useEffect(() => {
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
@@ -277,6 +375,7 @@ export default function ARExperience({
   }, []);
 
   const cameraActive = phase === "scanning" || phase === "tracking";
+  const showModeControls = cameraActive && hasTrackedOnce;
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden">
@@ -423,6 +522,56 @@ export default function ARExperience({
         </div>
       )}
 
+      {/* ===================== MODE CONTROLS (acima do card) ===================== */}
+      {showModeControls && (
+        <div className="absolute inset-x-0 bottom-[180px] sm:bottom-[170px] px-4 flex justify-center z-10">
+          <div className="inline-flex bg-black/60 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => switchMode("marker")}
+              className={
+                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
+                (mode === "marker"
+                  ? "bg-primary text-white"
+                  : "text-white/80 hover:text-white")
+              }
+            >
+              Seguir QR
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode("screen")}
+              className={
+                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
+                (mode === "screen"
+                  ? "bg-primary text-white"
+                  : "text-white/80 hover:text-white")
+              }
+            >
+              Fixar na tela
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode("world")}
+              disabled={phase !== "tracking"}
+              title={
+                phase !== "tracking"
+                  ? "Aponte para o QR primeiro"
+                  : "Congela o produto onde o QR está"
+              }
+              className={
+                "px-3 py-2 rounded-full text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
+                (mode === "world"
+                  ? "bg-primary text-white"
+                  : "text-white/80 hover:text-white")
+              }
+            >
+              Colocar aqui
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ============================== BOTTOM CARD ============================== */}
       {cameraActive && (
         <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(env(safe-area-inset-bottom),16px)] z-10">
@@ -432,42 +581,62 @@ export default function ARExperience({
                 <p className="text-base font-medium text-white truncate">
                   {productName}
                 </p>
-                {priceCents != null && (
-                  <p className="text-lg text-primary font-semibold mt-0.5">
-                    {formatPrice(priceCents, currency)}
-                  </p>
-                )}
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  {priceCents != null && (
+                    <p className="text-lg text-primary font-semibold mt-0.5">
+                      {formatPrice(priceCents, currency)}
+                    </p>
+                  )}
+                  {sizeLabel && (
+                    <span className="text-[10px] text-white/60 bg-white/5 px-1.5 py-0.5 rounded">
+                      Tam. {sizeLabel}
+                    </span>
+                  )}
+                  {physicalMaxCm != null && (
+                    <span className="text-[10px] text-white/60">
+                      {physicalMaxCm} cm
+                    </span>
+                  )}
+                </div>
               </div>
-              {phase === "tracking" ? (
-                <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Rastreando
+              {mode === "marker" ? (
+                phase === "tracking" ? (
+                  <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Rastreando
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    Procurando
+                  </div>
+                )
+              ) : mode === "screen" ? (
+                <div className="inline-flex items-center gap-1.5 text-[10px] text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                  Fixo na tela
                 </div>
               ) : (
-                <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  Procurando
+                <div className="inline-flex items-center gap-1.5 text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                  Posicionado
                 </div>
               )}
             </div>
 
-            {phase === "tracking" && (
-              <p className="text-[11px] text-white/60 mt-2 flex items-center gap-1.5">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className="w-3.5 h-3.5"
-                >
-                  <path
-                    d="M7 12a5 5 0 1 1 10 0M12 7v10M7 12l-2-2M17 12l2-2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                Arraste o dedo na tela para girar o produto
-              </p>
-            )}
+            <p className="text-[11px] text-white/60 mt-2 flex items-center gap-1.5">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="w-3.5 h-3.5 shrink-0"
+              >
+                <path
+                  d="M7 12a5 5 0 1 1 10 0M12 7v10M7 12l-2-2M17 12l2-2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Arraste o dedo na tela para girar o produto
+            </p>
           </div>
         </div>
       )}

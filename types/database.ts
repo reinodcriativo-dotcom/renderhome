@@ -1,5 +1,12 @@
 export type ProductStatus = "draft" | "ready" | "archived";
 
+export type ProductCategory =
+  | "tenis"
+  | "camiseta"
+  | "bone"
+  | "relogio"
+  | "custom";
+
 export type OverlayType = "text" | "price" | "badge";
 
 export type Json =
@@ -43,6 +50,12 @@ export interface Database {
           description: string | null;
           price_cents: number | null;
           currency: string;
+          category: ProductCategory;
+          size_label: string | null;
+          dim_length_cm: number | null;
+          dim_width_cm: number | null;
+          dim_height_cm: number | null;
+          marker_width_cm: number;
           model_url: string | null;
           model_path: string | null;
           model_size_bytes: number | null;
@@ -63,6 +76,12 @@ export interface Database {
           description?: string | null;
           price_cents?: number | null;
           currency?: string;
+          category?: ProductCategory;
+          size_label?: string | null;
+          dim_length_cm?: number | null;
+          dim_width_cm?: number | null;
+          dim_height_cm?: number | null;
+          marker_width_cm?: number;
           model_url?: string | null;
           model_path?: string | null;
           model_size_bytes?: number | null;
