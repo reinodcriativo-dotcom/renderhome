@@ -276,80 +276,228 @@ export default function ARExperience({
     };
   }, []);
 
-  return (
-    <div className="fixed inset-0 bg-black">
-      <div ref={containerRef} className="absolute inset-0" />
+  const cameraActive = phase === "scanning" || phase === "tracking";
 
-      {phase === "idle" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center space-y-4 bg-background/90">
-          <h1 className="text-2xl font-semibold">{productName}</h1>
-          {priceCents != null && (
-            <p className="text-xl text-primary">
-              {formatPrice(priceCents, currency)}
-            </p>
-          )}
+  return (
+    <div className="fixed inset-0 bg-black overflow-hidden">
+      {/* Container que recebe o video + canvas do MindAR. object-fit cover
+          faz o feed da camera preencher a tela inteira sem barras pretas. */}
+      <div
+        ref={containerRef}
+        className="ar-container absolute inset-0 [&>video]:!w-full [&>video]:!h-full [&>video]:object-cover [&>canvas]:!w-full [&>canvas]:!h-full"
+      />
+
+      {/* Gradiente sutil no topo e no rodape para legibilidade da UI */}
+      {cameraActive && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/70 to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 to-transparent" />
+        </>
+      )}
+
+      {/* ============================== HEADER ============================== */}
+      {cameraActive && (
+        <header className="absolute inset-x-0 top-0 px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 flex items-center justify-between gap-3 z-10">
           <button
             type="button"
-            onClick={startAR}
-            className="btn btn-primary text-base px-6 py-3 mt-2"
+            onClick={() => {
+              try {
+                if (mindarRef.current) mindarRef.current.stop();
+              } catch {
+                /* noop */
+              }
+              window.location.href = "/";
+            }}
+            aria-label="Fechar"
+            className="w-9 h-9 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white active:scale-95 transition-transform"
           >
-            Iniciar realidade aumentada
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-5 h-5"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
-          <p className="text-xs text-muted max-w-xs">
-            O navegador vai pedir acesso à câmera. Depois aponte para o QR
-            para ver o produto 3D em cima dele.
+
+          <div className="text-xs font-medium tracking-wide text-white/90 bg-black/40 backdrop-blur px-3 py-1.5 rounded-full">
+            Render<span className="text-primary">AR</span>
+          </div>
+
+          <div className="w-9 h-9" aria-hidden />
+        </header>
+      )}
+
+      {/* ============================== IDLE ============================== */}
+      {phase === "idle" && (
+        <div className="absolute inset-0 flex flex-col bg-gradient-to-b from-zinc-950 via-background to-zinc-950">
+          <div className="px-6 pt-[max(env(safe-area-inset-top),24px)]">
+            <div className="text-xs text-muted tracking-widest uppercase">
+              Render<span className="text-primary">AR</span>
+            </div>
+          </div>
+
+          <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
+            <div className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-6">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="w-12 h-12 text-primary"
+              >
+                <path
+                  d="M3 7V5a2 2 0 0 1 2-2h2M3 17v2a2 2 0 0 0 2 2h2M17 3h2a2 2 0 0 1 2 2v2M17 21h2a2 2 0 0 0 2-2v-2M9 9h6v6H9z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+
+            <p className="text-xs uppercase tracking-widest text-muted mb-2">
+              Produto em AR
+            </p>
+            <h1 className="text-3xl font-semibold mb-2">{productName}</h1>
+            {priceCents != null && (
+              <p className="text-2xl text-primary font-medium mb-6">
+                {formatPrice(priceCents, currency)}
+              </p>
+            )}
+
+            <p className="text-sm text-muted max-w-xs leading-relaxed mb-8">
+              Aponte a câmera para o QR físico e veja o produto em 3D, em
+              tamanho real, sobre a superfície.
+            </p>
+
+            <button
+              type="button"
+              onClick={startAR}
+              className="btn btn-primary text-base px-8 py-3.5 shadow-lg shadow-primary/30"
+            >
+              Iniciar realidade aumentada
+            </button>
+          </div>
+
+          <p className="text-[11px] text-muted/70 text-center pb-[max(env(safe-area-inset-bottom),20px)] px-6">
+            O navegador vai pedir acesso à câmera ao continuar.
           </p>
         </div>
       )}
 
+      {/* ============================== LOADING ============================== */}
       {phase === "loading" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-background/90">
-          <div className="h-1.5 w-48 bg-zinc-800 rounded overflow-hidden mb-3">
-            <div
-              className="h-full bg-primary animate-pulse"
-              style={{ width: "50%" }}
-            />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-background/95 backdrop-blur">
+          <div className="relative w-16 h-16 mb-6">
+            <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin" />
           </div>
-          <p className="text-sm text-muted">{step}</p>
+          <p className="text-sm text-foreground/80">{step}</p>
+          <p className="text-xs text-muted mt-2 max-w-xs">
+            Primeiro carregamento pode levar 10–30 segundos.
+          </p>
+        </div>
+      )}
+
+      {/* ============================== SCANNING ============================== */}
+      {phase === "scanning" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[5]">
+          {/* Marco visual no centro indicando onde apontar */}
+          <div className="relative w-48 h-48 sm:w-56 sm:h-56">
+            <div className="absolute top-0 left-0 w-8 h-8 border-l-2 border-t-2 border-white/80 rounded-tl-md animate-pulse" />
+            <div className="absolute top-0 right-0 w-8 h-8 border-r-2 border-t-2 border-white/80 rounded-tr-md animate-pulse" />
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-l-2 border-b-2 border-white/80 rounded-bl-md animate-pulse" />
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-r-2 border-b-2 border-white/80 rounded-br-md animate-pulse" />
+          </div>
         </div>
       )}
 
       {phase === "scanning" && (
-        <div className="absolute top-0 left-0 right-0 p-4 text-center pointer-events-none">
-          <div className="inline-block bg-black/70 backdrop-blur px-4 py-2 rounded-full text-sm">
+        <div className="absolute inset-x-0 top-20 px-4 text-center pointer-events-none z-10">
+          <div className="inline-block bg-black/60 backdrop-blur-md px-4 py-2 rounded-full text-sm text-white/95 shadow-lg">
             Aponte para o QR code
           </div>
         </div>
       )}
 
-      {(phase === "scanning" || phase === "tracking") && (
-        <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none">
-          <div className="bg-black/70 backdrop-blur rounded-xl p-3 text-center">
-            <p className="font-medium">{productName}</p>
-            {priceCents != null && (
-              <p className="text-sm text-primary">
-                {formatPrice(priceCents, currency)}
-              </p>
-            )}
+      {/* ============================== BOTTOM CARD ============================== */}
+      {cameraActive && (
+        <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(env(safe-area-inset-bottom),16px)] z-10">
+          <div className="bg-black/60 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-base font-medium text-white truncate">
+                  {productName}
+                </p>
+                {priceCents != null && (
+                  <p className="text-lg text-primary font-semibold mt-0.5">
+                    {formatPrice(priceCents, currency)}
+                  </p>
+                )}
+              </div>
+              {phase === "tracking" ? (
+                <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Rastreando
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  Procurando
+                </div>
+              )}
+            </div>
+
             {phase === "tracking" && (
-              <p className="text-[10px] text-emerald-400 mt-1">
-                Rastreando ✓
+              <p className="text-[11px] text-white/60 mt-2 flex items-center gap-1.5">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="w-3.5 h-3.5"
+                >
+                  <path
+                    d="M7 12a5 5 0 1 1 10 0M12 7v10M7 12l-2-2M17 12l2-2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Arraste o dedo na tela para girar o produto
               </p>
             )}
           </div>
         </div>
       )}
 
+      {/* ============================== ERROR ============================== */}
       {phase === "error" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center space-y-3 bg-background/90">
-          <p className="text-rose-400 font-medium">
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-background/95 backdrop-blur">
+          <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mb-4">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="w-7 h-7 text-rose-400"
+            >
+              <path
+                d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <p className="text-base text-foreground font-medium mb-1">
             Não foi possível iniciar a AR
           </p>
-          <p className="text-xs text-muted max-w-sm">{error}</p>
+          <p className="text-xs text-muted max-w-sm mb-5 break-all">{error}</p>
           <button
             type="button"
             onClick={startAR}
-            className="btn btn-secondary mt-2"
+            className="btn btn-secondary"
           >
             Tentar de novo
           </button>
