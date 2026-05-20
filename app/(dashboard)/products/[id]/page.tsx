@@ -34,6 +34,19 @@ export default async function ProductDetailPage({
       ? `${env.APP_URL}/ar/${product.public_slug}`
       : null;
 
+  // Para exibir o QR no dashboard do dono, usamos uma URL assinada (1h).
+  // <img> nao envia auth headers, entao a URL publica falha para anon
+  // mesmo o dono estando logado. A URL publica continua salva no DB para
+  // uso da pagina AR publica (que carrega o .mind como anon legitimo
+  // quando o produto e ready+public).
+  let markerSignedUrl: string | null = null;
+  if (product.marker_path) {
+    const { data: signed } = await supabase.storage
+      .from(env.SUPABASE_BUCKET)
+      .createSignedUrl(product.marker_path, 3600);
+    markerSignedUrl = signed?.signedUrl ?? null;
+  }
+
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       <div>
@@ -114,7 +127,7 @@ export default async function ProductDetailPage({
           publicSlug={product.public_slug ?? ""}
           status={product.status}
           hasModel={!!product.model_url}
-          markerUrl={product.marker_url}
+          markerUrl={markerSignedUrl}
           mindFileUrl={product.mind_file_url}
           productName={product.name}
         />
