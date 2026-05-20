@@ -56,6 +56,13 @@ interface MindARThreeCtor {
     uiLoading?: string;
     uiScanning?: string;
     uiError?: string;
+    // Suavizacao do tracking — valores menores = mais suave porem com lag.
+    filterMinCF?: number;
+    filterBeta?: number;
+    // Tolerancias de frames antes de disparar onTargetFound/Lost.
+    warmupTolerance?: number;
+    missTolerance?: number;
+    maxTrack?: number;
   }): MindARThreeInstance;
 }
 
@@ -108,11 +115,18 @@ async function loadGLTFLoader(): Promise<GLTFLoaderCtor> {
   return mod.GLTFLoader;
 }
 
+/**
+ * Normaliza o tamanho do modelo para ~60% da largura do marker (1 unidade
+ * = largura do QR no espaco MindAR). Centraliza e apoia ligeiramente
+ * acima do plano do QR para nao ficar embutido.
+ */
+const MODEL_FIT_FRACTION = 0.6;
+
 function fitModelToMarker(THREE: ThreeNS, scene: ThreeObject3D) {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 0.0001);
-  const scale = 1 / maxDim;
+  const scale = MODEL_FIT_FRACTION / maxDim;
   scene.scale.setScalar(scale);
 
   const center = box.getCenter(new THREE.Vector3());
@@ -171,21 +185,62 @@ export default function ARExperience({
         uiLoading: "no",
         uiScanning: "no",
         uiError: "no",
+        // Filtros de pose 1 euro: mais suaves que o default. Reduzem
+        // tremor sem comprometer responsividade demais (lag perceptivel
+        // ~50ms). Sao os valores tipicos recomendados para QR.
+        filterMinCF: 0.0001,
+        filterBeta: 100,
+        warmupTolerance: 5,
+        missTolerance: 8,
+        maxTrack: 1,
       });
       mindarRef.current = mindarThree;
 
       const { renderer, scene, camera } = mindarThree;
 
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       const dir = new THREE.DirectionalLight(0xffffff, 1.2);
       dir.position.set(2, 5, 3);
       scene.add(ambient);
       scene.add(dir);
 
+      // O modelo vai dentro de um Group "holder" para que possamos
+      // aplicar rotacao por dedo SEM mexer na rotacao do anchor (que
+      // segue o marker fisico). Resultado: anchor segue o QR no espaco,
+      // holder gira em Y conforme o usuario arrasta o dedo.
+      const modelHolder = new THREE.Group();
+      modelHolder.add(gltf.scene);
       const anchor = mindarThree.addAnchor(0);
-      anchor.group.add(gltf.scene);
+      anchor.group.add(modelHolder);
       anchor.onTargetFound = () => setPhase("tracking");
       anchor.onTargetLost = () => setPhase("scanning");
+
+      // Touch / pointer drag horizontal -> rotacao Y do modelo.
+      const container = containerRef.current;
+      let dragX: number | null = null;
+      const onDown = (e: PointerEvent) => {
+        dragX = e.clientX;
+        container.setPointerCapture(e.pointerId);
+      };
+      const onMove = (e: PointerEvent) => {
+        if (dragX === null) return;
+        const dx = e.clientX - dragX;
+        modelHolder.rotation.y += dx * 0.01;
+        dragX = e.clientX;
+      };
+      const onUp = (e: PointerEvent) => {
+        dragX = null;
+        try {
+          container.releasePointerCapture(e.pointerId);
+        } catch {
+          /* noop */
+        }
+      };
+      container.style.touchAction = "none";
+      container.addEventListener("pointerdown", onDown);
+      container.addEventListener("pointermove", onMove);
+      container.addEventListener("pointerup", onUp);
+      container.addEventListener("pointercancel", onUp);
 
       await mindarThree.start();
       setPhase("scanning");
