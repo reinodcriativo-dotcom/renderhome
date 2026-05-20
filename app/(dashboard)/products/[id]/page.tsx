@@ -7,6 +7,7 @@ import { formatBytes, formatDate, formatPrice } from "@/lib/utils";
 import ProductStatusBadge from "@/components/products/ProductStatusBadge";
 import GlbUploader from "@/components/products/GlbUploader";
 import PublishToggle from "@/components/products/PublishToggle";
+import QRGenerator from "@/components/products/QRGenerator";
 
 export const dynamic = "force-dynamic";
 
@@ -99,13 +100,42 @@ export default async function ProductDetailPage({
       </div>
 
       <div className="card p-5 sm:p-6 space-y-4">
-        <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-medium">QR Code</h2>
+          <p className="text-sm text-muted">
+            Imprima e cole no produto físico. Quando o cliente apontar a câmera,
+            o modelo 3D aparece sobreposto.
+          </p>
+        </div>
+
+        <QRGenerator
+          productId={id}
+          userId={user.id}
+          publicSlug={product.public_slug ?? ""}
+          status={product.status}
+          hasModel={!!product.model_url}
+          markerUrl={product.marker_url}
+          mindFileUrl={product.mind_file_url}
+          productName={product.name}
+        />
+
+        {arUrl && (
+          <div className="space-y-1 pt-2">
+            <p className="text-xs text-muted">URL pública AR:</p>
+            <code className="block text-xs bg-zinc-900 border border-border rounded px-3 py-2 truncate">
+              {arUrl}
+            </code>
+          </div>
+        )}
+      </div>
+
+      {product.status === "ready" && (
+        <div className="card p-5 sm:p-6 flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-medium">Publicação</h2>
+            <h2 className="font-medium">Status</h2>
             <p className="text-sm text-muted">
-              {product.status === "ready"
-                ? "Produto publicado. Em breve será possível gerar o QR (Fase 3)."
-                : "Publique para gerar o QR público (Fase 3 implementa o QR; agora só marca o produto como pronto)."}
+              Despublicar oculta a página AR. O QR continua salvo e pode ser
+              reativado depois.
             </p>
           </div>
           <PublishToggle
@@ -114,16 +144,7 @@ export default async function ProductDetailPage({
             canPublish={!!product.model_url}
           />
         </div>
-
-        {arUrl && (
-          <div className="space-y-1">
-            <p className="text-xs text-muted">URL pública AR (Fase 4):</p>
-            <code className="block text-xs bg-zinc-900 border border-border rounded px-3 py-2 truncate">
-              {arUrl}
-            </code>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
