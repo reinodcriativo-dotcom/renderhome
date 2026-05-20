@@ -1,178 +1,192 @@
-# RenderEstate 3D
+# RenderEstate 3D / RenderHome
 
-App web mobile-first para capturar, processar e compartilhar **ambientes 3D de imóveis**
-diretamente do celular.
+App web mobile-first para capturar, processar e compartilhar **ambientes 3D de
+imóveis** diretamente do celular. O front roda em Vercel + Supabase. O
+processamento 3D real (fotogrametria) acontece em um **worker local na sua
+máquina**, acionado manualmente — sem precisar de cloud paga.
 
-Este repositório contém o **MVP (Fase 1)**: autenticação, dashboard, CRUD de espaços,
-upload de vídeo/imagens, processamento **mockado** e visualizador público em
-Three.js / React Three Fiber. A arquitetura já está preparada para plugar um pipeline
-real de Gaussian Splatting (`gsplat` / `graphdeco-inria/gaussian-splatting`) no futuro.
-
-A spec completa está em [`SPEC.md`](SPEC.md).
+A spec completa do produto está em [`SPEC.md`](SPEC.md).
 
 ---
 
+## Arquitetura em uma frase
+
+**Phone** captura vídeo/fotos → upload Supabase Storage → cria job `queued` →
+você senta no PC, roda `npm run render`, ele baixa os inputs, chama Meshroom
+(fotogrametria com GPU), gera `.glb`, faz upload de volta e atualiza o status →
+**Phone** vê o ambiente 3D no link público.
+
 ## Stack
 
-- **Next.js 15** (App Router) + **React 19** + **TypeScript**
-- **Tailwind CSS**
-- **Supabase**: Auth + PostgreSQL + Storage + Realtime
-- **Three.js** + **@react-three/fiber** + **@react-three/drei**
-- **Zod** para validação
+- **Frontend (Vercel)**: Next.js 15 + React 19 + TypeScript + Tailwind
+- **Backend (Supabase)**: Auth + PostgreSQL + Storage + Realtime
+- **Viewer 3D**: Three.js + @react-three/fiber + @mkkellogg/gaussian-splats-3d
+- **Worker local**: Node.js (tsx) + Meshroom CLI + ffmpeg + obj2gltf
 
 ---
 
 ## 1. Pré-requisitos
 
-- Node.js 20 ou superior
-- Uma conta gratuita no [Supabase](https://supabase.com)
+- Node.js 20+
+- Conta gratuita no [Supabase](https://supabase.com)
+- (Opcional, para o worker) PC com GPU NVIDIA CUDA + Meshroom instalado
 
 ---
 
-## 2. Criar o projeto no Supabase
+## 2. Provisionar o Supabase
 
-1. Acesse <https://supabase.com/dashboard> e clique em **New project**.
-2. Escolha um nome (ex.: `renderestate-3d`), defina uma senha forte do banco
-   e a região mais próxima (ex.: South America — São Paulo).
-3. Espere o provisionamento terminar (~1 min).
-
-### 2.1 Desativar confirmação de e-mail (MVP)
-
-Como o MVP não exige confirmação, vá em:
-
-**Authentication → Providers → Email**
-
-E desligue a opção **Confirm email**. Salve.
-
-### 2.2 Rodar as migrações SQL
-
-Em **SQL Editor**, rode os arquivos da pasta `supabase/migrations/` **nesta ordem**:
-
-1. `0001_init.sql` — tabelas, índices, triggers
-2. `0002_policies.sql` — Row Level Security
-3. `0003_storage.sql` — policies do bucket de storage
-
-> Cada arquivo é idempotente (usa `if not exists` / `drop policy if exists`), então
-> você pode rodar de novo se precisar.
-
-### 2.3 Criar o bucket de storage
-
-Em **Storage → New bucket**:
-
-- **Name:** `spaces`
-- **Public bucket:** **desligado** (a leitura pública é controlada por policy)
-
-Depois rode `0003_storage.sql` se ainda não rodou.
-
-### 2.4 Pegar as chaves
-
-Em **Settings → API**, copie:
-
-- `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-- `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (NUNCA exponha no client!)
+1. Crie um projeto em <https://supabase.com/dashboard> (free tier, região mais
+   próxima — South America é ideal).
+2. **Authentication → Providers → Email** → desligue **Confirm email** (o MVP
+   não exige confirmação).
+3. **SQL Editor** → rode em ordem os arquivos de [`supabase/migrations/`](supabase/migrations/):
+   1. `0001_init.sql` — tabelas, índices, triggers
+   2. `0002_policies.sql` — Row Level Security
+   3. **Antes** do passo 4, crie o bucket: **Storage → New bucket** com **Name:** `spaces` e **Public bucket: DESLIGADO**
+   4. `0003_storage.sql` — policies do bucket
+4. **Settings → API Keys** → copie:
+   - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
+   - Publishable key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - Secret key (Reveal) → `SUPABASE_SERVICE_ROLE_KEY` (privada, **nunca** no client)
 
 ---
 
-## 3. Configurar o app localmente
+## 3. Rodar o app localmente
 
 ```bash
 cp .env.example .env.local
-```
-
-Edite `.env.local` com os valores do passo 2.4.
-
-Instale as dependências e rode:
-
-```bash
+# preencha NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+# SUPABASE_SERVICE_ROLE_KEY no .env.local
 npm install
 npm run dev
 ```
 
 Abra <http://localhost:3000>.
 
-### Modelo 3D de exemplo (opcional)
-
-O viewer carrega `/sample-models/sample.glb` por padrão. Veja
-[`public/sample-models/README.md`](public/sample-models/README.md) para baixar um
-modelo gratuito (1-2 MB). **Se o arquivo não existir, o viewer cai num placeholder
-procedural automaticamente** — então você pode pular este passo e testar tudo.
-
 ---
 
-## 4. Fluxo do MVP
+## 4. Fluxo do app
 
 1. Criar conta (`/register`) → você é logado automaticamente.
 2. Criar um espaço (`/spaces/new`).
-3. Adicionar capturas (vídeo ou imagens) na tela de captura.
-4. Clicar em **Iniciar processamento**. O mock leva ~6 segundos e atualiza o status
-   ao vivo via Supabase Realtime.
-5. Quando o status virar **Pronto**, copiar o link público e abrir em outra aba ou
-   anônimo — visualização 3D **sem login**.
+3. Adicionar capturas: **gravar vídeo** pela câmera do celular ou enviar fotos.
+4. Clicar em **Iniciar processamento** → cria um job em `queued`.
+5. **(você no PC)** roda `npm run render` → script baixa inputs, processa,
+   sobe `.glb`, marca como `completed`.
+6. **(de volta no celular)** o status muda ao vivo via Realtime → link público
+   funcional em `/view/[slug]`.
 
 ---
 
-## 5. Estrutura
+## 5. Configurar o worker local (Meshroom)
+
+O worker roda **fotogrametria** com Meshroom. Funciona bem com GPU NVIDIA
+mesmo de 2GB (é mais leve que Gaussian Splatting). Cobra zero — só sua
+eletricidade e tempo do PC.
+
+### 5.1 Instalar Meshroom
+
+1. Baixe a versão Windows em <https://alicevision.org/#meshroom> (~1GB zip).
+2. Extraia em algum lugar (ex.: `C:\Tools\Meshroom-2023.3.0\`).
+3. Confirme que existe `meshroom_batch.exe` dentro dessa pasta.
+
+> **Mac/Linux**: o pré-build oficial não cobre Apple Silicon. Em Linux roda
+> com a build oficial. Mac M1/M2/M3 precisa compilar do source.
+
+### 5.2 Apontar no .env.local
+
+```bash
+MESHROOM_PATH=C:\Tools\Meshroom-2023.3.0\meshroom_batch.exe
+```
+
+(Use o caminho real onde você extraiu o Meshroom.)
+
+### 5.3 Rodar
+
+```bash
+npm run render
+```
+
+O script vai:
+
+1. Listar jobs em `queued` / `processing`
+2. Pedir pra escolher um (auto se for só um)
+3. Baixar fotos/vídeos do Supabase Storage para `./renders/<job-id>/inputs/`
+4. Extrair frames de vídeos com ffmpeg-static (2fps, max 1920px)
+5. Rodar `meshroom_batch` — **isso leva 30 min a 2h** dependendo da GPU e cena
+6. Converter o `texturedMesh.obj` para `.glb` (`obj2gltf`)
+7. Subir o `.glb` para o Supabase Storage em `<user_id>/<space_id>/render-*.glb`
+8. Atualizar `space.viewer_url` e marcar `status=completed`
+
+A cada etapa o `processing_jobs.progress` é atualizado, e o app no celular
+vê via Realtime.
+
+### 5.4 Tunings para baixo VRAM (opcional)
+
+Se Meshroom der OOM (out of memory) com sua GPU de 2GB, edite seu
+`.env.local`:
+
+```bash
+MESHROOM_PARAM_OVERRIDES=DepthMap:downscale=8,Meshing:maxInputPoints=5000000
+```
+
+Isso reduz a resolução do depth map (mais leve em VRAM, qualidade menor).
+
+---
+
+## 6. Estrutura
 
 ```
 /app
   /(auth)/login, /register     -> autenticação
   /(dashboard)/spaces/...      -> área privada do usuário
   /view/[slug]                 -> visualizador público (sem login)
-  /api/spaces/...              -> route handlers para CRUD e processamento
-/components
-  /auth, /spaces, /upload, /viewer, /layout
-/lib
-  supabase-client.ts, supabase-server.ts, auth.ts, storage.ts,
-  validators.ts, slug.ts, env.ts, utils.ts
-/server
-  jobs.ts, processing.ts       -> mock do worker de Gaussian Splatting
+  /api/spaces/...              -> route handlers (CRUD + dispatch de jobs)
+/components/auth /spaces /upload /viewer /layout
+/lib                           -> supabase clients, validators, utils
+/server/jobs.ts                -> cria job em queued (worker local processa)
+/scripts
+  render.ts                    -> ENTRY do worker local
+  /lib                         -> módulos (supabase, prompt, inputs,
+                                  meshroom, convert, upload)
 /supabase/migrations           -> SQL para schema + RLS + storage
 /types                         -> tipos do banco e dos domínios
-/public/sample-models          -> modelo .glb usado pelo viewer enquanto
-                                  o pipeline real não existe
 ```
 
 ---
 
-## 6. Roadmap
-
-- **Fase 1 — MVP** *(este repositório)*
-  Fluxo completo com processamento mockado.
-
-- **Fase 2 — Processamento real**
-  Worker em Python (CUDA) consumindo a fila e rodando
-  [`gsplat`](https://github.com/nerfstudio-project/gsplat) ou
-  [`graphdeco-inria/gaussian-splatting`](https://github.com/graphdeco-inria/gaussian-splatting).
-  Geração de `.ply` / `.splat` / `.spz` e upload para o storage. Substitui o mock
-  em [`server/processing.ts`](server/processing.ts) — o resto do app não muda.
-
-- **Fase 3 — Viewer web de Gaussian Splat**
-  Trocar o `<Model>` do `SplatViewer.tsx` por um renderizador WebGL de splats
-  (ex.: mkkellogg/gaussian-splats-3d, antimatter15/splat).
-
-- **Fase 4 — iOS premium**
-  App nativo com ARKit / RoomPlan +
-  [`MetalSplatter`](https://github.com/scier/MetalSplatter) para renderização
-  nativa de splats em iPhones Pro com LiDAR.
-
----
-
-## 7. Segurança
-
-- Todas as tabelas têm **RLS** habilitado.
-- Usuário autenticado só vê/edita os próprios espaços.
-- Visitantes acessam apenas spaces com `is_public=true` **e** `status='completed'`.
-- `SUPABASE_SERVICE_ROLE_KEY` só é usada no `server/processing.ts` (worker mock)
-  e nunca é exposta no client.
-
----
-
-## 8. Comandos úteis
+## 7. Comandos
 
 ```bash
-npm run dev         # dev server
-npm run build       # build de produção
+npm run dev         # dev server (front)
+npm run build       # build de produção (front)
 npm run start       # rodar build
 npm run typecheck   # verificação de tipos
+npm run render      # worker local de fotogrametria
 ```
+
+---
+
+## 8. Roadmap
+
+- **Fase 1 — MVP** ✅
+  Auth, dashboard, CRUD de spaces, upload, viewer público com placeholder.
+- **Fase 2 — Worker local de fotogrametria** ✅
+  Pipeline Meshroom local → `.glb` no Storage. Acionado manualmente.
+- **Fase 3 — Gaussian Splatting real**
+  Quando houver budget/hardware, trocar Meshroom por `gsplat` (Nerfstudio)
+  ou pipeline cloud (RunPod). Output `.ply` em vez de `.glb`. O viewer já
+  detecta extensão e usa o renderer correto (mkkellogg).
+- **Fase 4 — iOS premium**
+  App nativo com ARKit / RoomPlan + [MetalSplatter](https://github.com/scier/MetalSplatter)
+  para renderização nativa em iPhones Pro com LiDAR.
+
+---
+
+## 9. Segurança
+
+- Todas as tabelas têm **RLS** habilitado.
+- Usuário autenticado só vê/edita os próprios spaces.
+- Visitantes acessam apenas spaces com `is_public=true` **e** `status='completed'`.
+- `SUPABASE_SERVICE_ROLE_KEY` é usada apenas no worker local
+  (`scripts/render.ts`) e nas migrações — nunca exposta ao client.

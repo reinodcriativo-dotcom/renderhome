@@ -17,7 +17,7 @@ export default async function CapturePage({
 
   const { data: space } = await supabase
     .from("spaces")
-    .select("id, name, user_id")
+    .select("*")
     .eq("id", id)
     .eq("user_id", user.id)
     .single();

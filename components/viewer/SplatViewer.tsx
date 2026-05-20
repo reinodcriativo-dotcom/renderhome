@@ -1,8 +1,14 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
-import { Component, useRef, useState, type ReactNode } from "react";
+import { OrbitControls, useGLTF, Bounds } from "@react-three/drei";
+import {
+  Component,
+  Suspense,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import RealSplatViewer from "./RealSplatViewer";
 
 class CanvasErrorBoundary extends Component<
@@ -21,18 +27,27 @@ class CanvasErrorBoundary extends Component<
   }
 }
 
-/**
- * Heuristica para detectar se uma URL aponta para um arquivo Gaussian Splat
- * suportado pelo viewer real (@mkkellogg/gaussian-splats-3d).
- */
-function isSplatUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
+function getExt(url: string | null | undefined): string | null {
+  if (!url) return null;
   const path = url.split("?")[0].toLowerCase();
-  return (
-    path.endsWith(".ply") ||
-    path.endsWith(".splat") ||
-    path.endsWith(".ksplat")
-  );
+  const dot = path.lastIndexOf(".");
+  if (dot < 0) return null;
+  return path.slice(dot);
+}
+
+function isSplatUrl(url: string | null | undefined): boolean {
+  const ext = getExt(url);
+  return ext === ".ply" || ext === ".splat" || ext === ".ksplat";
+}
+
+function isMeshUrl(url: string | null | undefined): boolean {
+  const ext = getExt(url);
+  return ext === ".glb" || ext === ".gltf";
+}
+
+function Mesh({ url }: { url: string }) {
+  const { scene } = useGLTF(url);
+  return <primitive object={scene} />;
 }
 
 function PlaceholderScene() {
@@ -65,7 +80,20 @@ function PlaceholderScene() {
   );
 }
 
-function PlaceholderCanvas() {
+function MeshOrPlaceholder({ url }: { url?: string | null }) {
+  if (!url) return <PlaceholderScene />;
+  return (
+    <CanvasErrorBoundary fallback={<PlaceholderScene />}>
+      <Suspense fallback={<PlaceholderScene />}>
+        <Bounds fit clip observe margin={1.2}>
+          <Mesh url={url} />
+        </Bounds>
+      </Suspense>
+    </CanvasErrorBoundary>
+  );
+}
+
+function R3FCanvas({ url }: { url?: string | null }) {
   return (
     <Canvas
       shadows
@@ -76,12 +104,12 @@ function PlaceholderCanvas() {
       <ambientLight intensity={0.6} />
       <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
       <directionalLight position={[-5, 6, -3]} intensity={0.4} />
-      <PlaceholderScene />
+      <MeshOrPlaceholder url={url} />
       <OrbitControls
         enableDamping
         dampingFactor={0.08}
-        minDistance={1}
-        maxDistance={30}
+        minDistance={0.5}
+        maxDistance={50}
       />
     </Canvas>
   );
@@ -100,7 +128,12 @@ export default function SplatViewer({ url }: { url?: string | null }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [splatFailed, setSplatFailed] = useState(false);
 
-  const showRealSplat = isSplatUrl(url) && !splatFailed;
+  // Decisao de qual renderer usar baseado na extensao da URL:
+  // - .ply / .splat / .ksplat  -> Gaussian Splat (mkkellogg)
+  // - .glb / .gltf             -> mesh (R3F + useGLTF) -- fotogrametria/Meshroom
+  // - qualquer outro (ou null) -> Canvas R3F com PlaceholderScene
+  const useRealSplat = isSplatUrl(url) && !splatFailed;
+  const useMesh = isMeshUrl(url);
 
   async function toggleFullscreen() {
     const el = containerRef.current;
@@ -120,13 +153,10 @@ export default function SplatViewer({ url }: { url?: string | null }) {
       className="relative w-full h-[60vh] sm:h-[70vh] bg-zinc-950 rounded-xl overflow-hidden border border-border"
     >
       <CanvasErrorBoundary fallback={<ViewerFallback />}>
-        {showRealSplat && url ? (
-          <RealSplatViewer
-            url={url}
-            onError={() => setSplatFailed(true)}
-          />
+        {useRealSplat && url ? (
+          <RealSplatViewer url={url} onError={() => setSplatFailed(true)} />
         ) : (
-          <PlaceholderCanvas />
+          <R3FCanvas url={useMesh ? url : null} />
         )}
       </CanvasErrorBoundary>
 

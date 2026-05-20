@@ -1,8 +1,6 @@
 import "server-only";
-import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { runMockProcessing } from "./processing";
 
 export async function createProcessingJob(
   supabase: SupabaseClient<Database>,
@@ -27,17 +25,10 @@ export async function createProcessingJob(
     .update({ status: "queued" })
     .eq("id", params.spaceId);
 
-  // Em serverless (Vercel), a execucao para quando a resposta volta. after()
-  // sinaliza ao runtime para manter o trabalho vivo apos o response — usando
-  // waitUntil internamente em plataformas que suportam (Vercel). Em producao
-  // real isto seria substituido por enqueue em fila + worker dedicado.
-  after(async () => {
-    try {
-      await runMockProcessing(job.id);
-    } catch (err) {
-      console.error("[jobs] processing failed", err);
-    }
-  });
-
+  // NOTA: o worker e LOCAL agora. O job fica em "queued" ate o usuario
+  // rodar `npm run render` no PC (com GPU NVIDIA + Meshroom instalado),
+  // que pega o proximo job na fila, processa e atualiza o status via
+  // SUPABASE_SERVICE_ROLE_KEY. O cliente recebe os updates em tempo real
+  // via Supabase Realtime.
   return job;
 }
