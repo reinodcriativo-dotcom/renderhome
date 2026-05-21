@@ -357,17 +357,9 @@ export default function ARExperience({
       await mindarThree.start();
       setPhase("scanning");
 
-      // No screen mode, atualizamos a pose do holder a cada frame
-      // para seguir a camera, em vez de reparentea-lo (mais robusto).
-      const forwardVec = new THREE.Vector3();
+      // No screen mode o holder fica filho da camera (parenteia em
+      // switchMode); nada para atualizar manualmente aqui.
       renderer.setAnimationLoop(() => {
-        if (modeRef.current === "screen" && modelHolderRef.current) {
-          forwardVec.set(0, 0, -1).applyQuaternion(camera.quaternion);
-          modelHolderRef.current.position
-            .copy(camera.position)
-            .addScaledVector(forwardVec, screenDistanceRef.current);
-          modelHolderRef.current.quaternion.copy(camera.quaternion);
-        }
         renderer.render(scene, camera);
       });
     } catch (err) {
@@ -435,16 +427,26 @@ export default function ARExperience({
       setMode("marker");
     } else if (next === "screen") {
       if (holder.parent) holder.parent.remove(holder);
+      // Garantir que a camera esta no scene tree (necessario para que
+      // filhos da camera sejam renderizados). MindAR nem sempre adiciona.
+      if (!camera.parent) {
+        scene.add(camera as unknown as ThreeObject3D);
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fovDeg = (camera as any).fov ?? 50;
       const fovRad = (fovDeg * Math.PI) / 180;
+      // Considera o zoom atual aplicado pelo usuario via pinch.
+      const inner = innerHolderRef.current;
+      const userScale = inner?.scale.x ?? 1;
+      const effectiveMax = maxDimUnits * userScale;
       const distance =
-        maxDimUnits / (2 * Math.tan(fovRad / 2) * 0.7);
+        effectiveMax / (2 * Math.tan(fovRad / 2) * 0.7);
       screenDistanceRef.current = Math.max(distance, 0.3);
-      holder.position.copy(camera.position);
-      holder.quaternion.copy(camera.quaternion);
+      // Parentear na camera: holder vai automatico onde a camera olha.
+      holder.position.set(0, 0, -screenDistanceRef.current);
+      holder.quaternion.identity();
       holder.scale.setScalar(1);
-      scene.add(holder);
+      camera.add(holder as unknown as ThreeObject3D);
       modeRef.current = "screen";
       setMode("screen");
     } else if (next === "world-from-anchor") {
@@ -463,14 +465,19 @@ export default function ARExperience({
       modeRef.current = "world";
       setMode("world");
     } else if (next === "drop") {
-      // O holder ja esta no scene (screen mode) na pose seguindo a camera.
-      // Soltar = parar de atualizar no render loop. Pose final = onde o
-      // holder esta agora. Garantimos que esta no scene caso algo tenha
-      // mudado.
-      if (holder.parent !== scene) {
-        if (holder.parent) holder.parent.remove(holder);
-        scene.add(holder);
-      }
+      // O holder esta como filho da camera (screen mode). Capturamos a
+      // pose mundial atual do holder, desparentamos da camera, e
+      // re-aplicamos a pose no scene root para "congelar" no mundo.
+      holder.updateMatrixWorld(true);
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scl = new THREE.Vector3();
+      holder.matrixWorld.decompose(pos, quat, scl);
+      if (holder.parent) holder.parent.remove(holder);
+      holder.position.copy(pos);
+      holder.quaternion.copy(quat);
+      holder.scale.copy(scl);
+      scene.add(holder);
       modeRef.current = "world";
       setMode("world");
     }
@@ -653,61 +660,93 @@ export default function ARExperience({
         </div>
       )}
 
-      {/* ===================== MODE CONTROLS (acima do card) ===================== */}
+      {/* ===================== MODE HUB (lateral esquerda) ===================== */}
       {showModeControls && (
-        <div className="absolute inset-x-0 bottom-[180px] sm:bottom-[170px] px-4 flex justify-center z-10">
-          <div className="inline-flex bg-black/60 backdrop-blur-md rounded-full border border-white/10 p-1 shadow-2xl">
-            <button
-              type="button"
-              onClick={() => switchMode("marker")}
-              className={
-                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
-                (mode === "marker"
-                  ? "bg-primary text-white"
-                  : "text-white/80 hover:text-white")
-              }
+        <aside className="absolute left-3 top-[max(env(safe-area-inset-top),12px)] z-10 flex flex-col gap-2 pt-16">
+          <ModeButton
+            label="Seguir QR"
+            active={mode === "marker"}
+            onClick={() => switchMode("marker")}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-5 h-5"
+              aria-hidden="true"
             >
-              Seguir QR
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode("world-from-anchor")}
-              disabled={phase !== "tracking"}
-              title={
-                phase !== "tracking"
-                  ? "Aponte para o QR primeiro"
-                  : "Congela o produto onde o QR está. Use 2 dedos para ajustar o tamanho."
-              }
-              className={
-                "px-3 py-2 rounded-full text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed " +
-                (mode === "world"
-                  ? "bg-primary text-white"
-                  : "text-white/80 hover:text-white")
-              }
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <path d="M14 14h3v3h-3zM18 18h3v3h-3z" />
+            </svg>
+          </ModeButton>
+
+          <ModeButton
+            label="Fixar"
+            active={mode === "world"}
+            disabled={phase !== "tracking" && mode !== "world"}
+            onClick={() => switchMode("world-from-anchor")}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-5 h-5"
+              aria-hidden="true"
             >
-              Fixar na tela
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                switchMode(mode === "screen" ? "drop" : "screen")
-              }
-              title={
-                mode === "screen"
-                  ? "Solta o produto na posição atual"
-                  : "Pega o produto: ele vai seguir a câmera. Posicione e clique de novo para soltar."
-              }
-              className={
-                "px-3 py-2 rounded-full text-xs font-medium transition-colors " +
-                (mode === "screen"
-                  ? "bg-amber-500 text-black"
-                  : "text-white/80 hover:text-white")
-              }
-            >
-              {mode === "screen" ? "Soltar" : "Colocar aqui"}
-            </button>
-          </div>
-        </div>
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V5a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+            </svg>
+          </ModeButton>
+
+          <ModeButton
+            label={mode === "screen" ? "Soltar" : "Pegar"}
+            active={mode === "screen"}
+            onClick={() =>
+              switchMode(mode === "screen" ? "drop" : "screen")
+            }
+          >
+            {mode === "screen" ? (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-5 h-5"
+                aria-hidden="true"
+              >
+                <path d="M12 3v12" />
+                <path d="m7 10 5 5 5-5" />
+                <path d="M5 21h14" />
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-5 h-5"
+                aria-hidden="true"
+              >
+                <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+                <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2" />
+                <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
+                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+              </svg>
+            )}
+          </ModeButton>
+        </aside>
       )}
 
       {/* ============================== BOTTOM CARD ============================== */}
@@ -859,5 +898,39 @@ function Stat({
         {label}
       </p>
     </div>
+  );
+}
+
+function ModeButton({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={
+        "w-16 px-1 py-2 flex flex-col items-center gap-1 rounded-2xl " +
+        "backdrop-blur-xl border shadow-lg transition-all " +
+        "active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed " +
+        (active
+          ? "bg-primary/90 border-white/30 text-white"
+          : "bg-white/15 border-white/20 text-white hover:bg-white/25")
+      }
+    >
+      <span className="block">{children}</span>
+      <span className="text-[10px] font-medium leading-tight">{label}</span>
+    </button>
   );
 }
