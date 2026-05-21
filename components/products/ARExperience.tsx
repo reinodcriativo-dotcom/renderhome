@@ -167,6 +167,7 @@ export default function ARExperience({
   sizeLabel,
   physicalMaxCm,
   markerWidthCm,
+  categoryLabel,
 }: {
   modelUrl: string;
   mindFileUrl: string;
@@ -176,6 +177,7 @@ export default function ARExperience({
   sizeLabel: string | null;
   physicalMaxCm: number | null;
   markerWidthCm: number;
+  categoryLabel?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindarRef = useRef<MindARThreeInstance | null>(null);
@@ -522,13 +524,13 @@ export default function ARExperience({
               window.location.href = "/";
             }}
             aria-label="Fechar"
-            className="w-9 h-9 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white active:scale-95 transition-transform"
+            className="w-10 h-10 rounded-full bg-white/90 backdrop-blur-md flex items-center justify-center text-zinc-900 active:scale-95 transition-transform shadow-lg"
           >
             <svg
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="2.2"
               strokeLinecap="round"
               strokeLinejoin="round"
               className="w-5 h-5"
@@ -537,11 +539,26 @@ export default function ARExperience({
             </svg>
           </button>
 
-          <div className="text-xs font-medium tracking-wide text-white/90 bg-black/40 backdrop-blur px-3 py-1.5 rounded-full">
-            Render<span className="text-primary">AR</span>
+          <div className="h-10 px-3 inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md shadow-lg text-zinc-900">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <path d="M14 14h3v3h-3zM18 18h3v3h-3z" />
+            </svg>
+            <span className="text-xs font-semibold tracking-wide">
+              Render<span className="text-primary">AR</span>
+            </span>
           </div>
-
-          <div className="w-9 h-9" aria-hidden />
         </header>
       )}
 
@@ -695,60 +712,91 @@ export default function ARExperience({
 
       {/* ============================== BOTTOM CARD ============================== */}
       {cameraActive && (
-        <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(env(safe-area-inset-bottom),16px)] z-10">
-          <div className="bg-black/60 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-base font-medium text-white truncate">
+        <div className="absolute inset-x-0 bottom-0 px-3 pb-[max(env(safe-area-inset-bottom),12px)] z-10">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+            {/* Top row: nome + preço, status pill, thumbnail */}
+            <div className="p-4 flex items-start gap-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {mode === "marker" ? (
+                    phase === "tracking" ? (
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Rastreando
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        Procurando
+                      </span>
+                    )
+                  ) : mode === "screen" ? (
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Segurando
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                      Posicionado
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="text-[15px] sm:text-base font-semibold text-zinc-900 leading-tight line-clamp-2">
                   {productName}
-                </p>
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  {priceCents != null && (
-                    <p className="text-lg text-primary font-semibold mt-0.5">
-                      {formatPrice(priceCents, currency)}
-                    </p>
-                  )}
-                  {sizeLabel && (
-                    <span className="text-[10px] text-white/60 bg-white/5 px-1.5 py-0.5 rounded">
-                      Tam. {sizeLabel}
-                    </span>
-                  )}
-                  {physicalMaxCm != null && (
-                    <span className="text-[10px] text-white/60">
-                      {physicalMaxCm} cm
-                    </span>
-                  )}
-                </div>
+                </h2>
+
+                {priceCents != null && (
+                  <p className="text-xl font-bold text-zinc-900 tabular-nums pt-1">
+                    {formatPrice(priceCents, currency)}
+                  </p>
+                )}
               </div>
-              {mode === "marker" ? (
-                phase === "tracking" ? (
-                  <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Rastreando
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    Procurando
-                  </div>
-                )
-              ) : mode === "screen" ? (
-                <div className="inline-flex items-center gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
-                  Segurando
-                </div>
-              ) : (
-                <div className="inline-flex items-center gap-1.5 text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/30 px-2 py-1 rounded-full whitespace-nowrap">
-                  Posicionado
-                </div>
-              )}
+
+              {/* Thumbnail: ícone com a categoria */}
+              <div className="shrink-0 w-16 h-16 rounded-2xl bg-zinc-100 border border-zinc-200 flex items-center justify-center text-zinc-400">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-8 h-8"
+                  aria-hidden="true"
+                >
+                  <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9Z" />
+                  <path d="M3.5 7.5 12 12l8.5-4.5" />
+                  <path d="M12 12v9" />
+                </svg>
+              </div>
             </div>
 
-            <p className="text-[11px] text-white/60 mt-2 leading-snug">
+            {/* Hint: muda conforme o modo */}
+            <p className="px-4 pb-2 text-[11px] text-zinc-500 leading-snug">
               {mode === "screen"
-                ? "Mire o celular onde quiser colocar e toque em Soltar."
-                : "Arraste com 1 dedo para girar · pinçada de 2 dedos para zoom."}
+                ? "Mire onde quiser colocar e toque em Soltar"
+                : "Arraste com 1 dedo para girar · pinçada de 2 dedos para zoom"}
             </p>
+
+            {/* Footer stats — 3 colunas separadas por linha vertical */}
+            <div className="grid grid-cols-3 border-t border-zinc-100 bg-zinc-50/50">
+              <Stat
+                label="Categoria"
+                value={categoryLabel ?? "—"}
+              />
+              <Stat
+                label="Tamanho"
+                value={sizeLabel ?? "—"}
+                divider
+              />
+              <Stat
+                label="Tamanho real"
+                value={physicalMaxCm != null ? `${physicalMaxCm} cm` : "—"}
+                divider
+              />
+            </div>
           </div>
         </div>
       )}
@@ -784,6 +832,32 @@ export default function ARExperience({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  divider,
+}: {
+  label: string;
+  value: string;
+  divider?: boolean;
+}) {
+  return (
+    <div
+      className={
+        "px-3 py-3 flex flex-col items-center justify-center text-center " +
+        (divider ? "border-l border-zinc-200" : "")
+      }
+    >
+      <p className="text-sm font-semibold text-zinc-900 tabular-nums truncate max-w-full">
+        {value}
+      </p>
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500 mt-0.5">
+        {label}
+      </p>
     </div>
   );
 }

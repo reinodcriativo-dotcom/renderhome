@@ -6,6 +6,7 @@ import {
 } from "@/lib/supabase-server";
 import { env } from "@/lib/env";
 import { formatPrice } from "@/lib/utils";
+import { CATEGORY_LABELS } from "@/lib/presets";
 import ARExperience from "@/components/products/ARExperience";
 
 export const revalidate = 0;
@@ -127,6 +128,9 @@ export default async function ARPage({
       sizeLabel={product.size_label ?? null}
       physicalMaxCm={physicalMaxCm}
       markerWidthCm={product.marker_width_cm ?? 10}
+      categoryLabel={
+        product.category ? CATEGORY_LABELS[product.category] : null
+      }
     />
   );
 }
