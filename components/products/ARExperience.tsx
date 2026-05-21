@@ -193,6 +193,10 @@ export default function ARExperience({
   // innerHolder fica DENTRO de modelHolder e segura a rotacao/escala
   // controladas pelo usuario (drag + pinch). Sobrevive a trocas de modo.
   const innerHolderRef = useRef<ThreeGroup | null>(null);
+  // Estado da animacao de entrada por particulas. Disparada uma unica vez
+  // no primeiro target_found (em modo marker).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const entryRef = useRef<any>(null);
   // Modo lido pelo render loop a cada frame para atualizar a pose do
   // holder em screen mode (sem precisar reparentear na camera).
   const modeRef = useRef<ARMode>("marker");
@@ -229,6 +233,119 @@ export default function ARExperience({
         physicalMaxCm,
         markerWidthCm,
       });
+
+      // -------- Particle entry animation setup --------
+      // Sample ~1500 vertices do gltf.scene em coordenadas locais a ele,
+      // posicionamos cada um numa direcao aleatoria espalhada em volta
+      // (initial), e animamos de volta a posicao real do vertice (final).
+      // Resultado: o modelo "se monta" a partir de uma nuvem de particulas.
+      const samplePositionsArr: number[] = [];
+      gltf.scene.updateMatrixWorld(true);
+      const sceneInv = new THREE.Matrix4()
+        .copy(gltf.scene.matrixWorld)
+        .invert();
+      let totalVerts = 0;
+      gltf.scene.traverse((o) => {
+        const mesh = o as unknown as {
+          isMesh?: boolean;
+          geometry?: { attributes?: { position?: { count: number } } };
+        };
+        if (mesh.isMesh && mesh.geometry?.attributes?.position) {
+          totalVerts += mesh.geometry.attributes.position.count;
+        }
+      });
+
+      if (totalVerts > 0) {
+        const targetCount = 1500;
+        const stride = Math.max(1, Math.floor(totalVerts / targetCount));
+        const tmp = new THREE.Vector3();
+        let counter = 0;
+        gltf.scene.traverse((o) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mesh = o as any;
+          if (mesh.isMesh && mesh.geometry?.attributes?.position) {
+            const pos = mesh.geometry.attributes.position;
+            const m = new THREE.Matrix4().multiplyMatrices(
+              sceneInv,
+              mesh.matrixWorld,
+            );
+            for (let v = 0; v < pos.count; v++) {
+              if (counter % stride === 0) {
+                tmp
+                  .set(pos.getX(v), pos.getY(v), pos.getZ(v))
+                  .applyMatrix4(m);
+                samplePositionsArr.push(tmp.x, tmp.y, tmp.z);
+              }
+              counter++;
+            }
+          }
+        });
+
+        const bbox = new THREE.Box3().setFromObject(gltf.scene);
+        const diag = bbox.getSize(new THREE.Vector3()).length();
+        const spread = diag * 0.6;
+
+        const finalPos = new Float32Array(samplePositionsArr);
+        const initialPos = new Float32Array(samplePositionsArr.length);
+        const currentPos = new Float32Array(samplePositionsArr.length);
+
+        for (let v = 0; v < finalPos.length; v += 3) {
+          const dir = new THREE.Vector3(
+            Math.random() - 0.5,
+            Math.random() * 1.2 - 0.2,
+            Math.random() - 0.5,
+          )
+            .normalize()
+            .multiplyScalar(spread * (0.5 + Math.random() * 0.8));
+          initialPos[v] = finalPos[v] + dir.x;
+          initialPos[v + 1] = finalPos[v + 1] + dir.y;
+          initialPos[v + 2] = finalPos[v + 2] + dir.z;
+          currentPos[v] = initialPos[v];
+          currentPos[v + 1] = initialPos[v + 1];
+          currentPos[v + 2] = initialPos[v + 2];
+        }
+
+        const pointsGeom = new THREE.BufferGeometry();
+        pointsGeom.setAttribute(
+          "position",
+          new THREE.BufferAttribute(currentPos, 3),
+        );
+
+        const pointsMat = new THREE.PointsMaterial({
+          color: 0xffffff,
+          size: Math.max(0.005, diag * 0.006),
+          sizeAttenuation: true,
+          transparent: true,
+          opacity: 1,
+          depthWrite: false,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          blending: (THREE as any).AdditiveBlending,
+        });
+
+        const points = new THREE.Points(pointsGeom, pointsMat);
+        points.visible = false;
+        // O ponto deve ser sibling do gltf.scene dentro de gltf.scene mesmo
+        // para herdar a transformacao de fitModelToMarker corretamente.
+        gltf.scene.add(points as unknown as ThreeObject3D);
+
+        entryRef.current = {
+          points,
+          mesh: gltf.scene,
+          positionAttr: pointsGeom.attributes.position,
+          initial: initialPos,
+          final: finalPos,
+          current: currentPos,
+          material: pointsMat,
+          startMs: 0,
+          durationMs: 900,
+          active: false,
+          done: false,
+        };
+        // Esconde o mesh ate a animacao de entrada disparar; assim nao
+        // aparece "instantaneamente" no primeiro target_found antes do
+        // efeito de particulas comecar.
+        gltf.scene.visible = false;
+      }
 
       setStep("Pedindo acesso à câmera…");
       const mindarThree = new MindARThree({
@@ -273,6 +390,20 @@ export default function ARExperience({
       anchor.onTargetFound = () => {
         setPhase("tracking");
         setHasTrackedOnce(true);
+        // Dispara a animacao de particulas UMA UNICA vez, somente no
+        // modo marker (em screen/world o mesh ja esta visivel offline).
+        const e = entryRef.current;
+        if (e && !e.done && modeRef.current === "marker") {
+          e.startMs = performance.now();
+          e.active = true;
+          e.points.visible = true;
+          e.mesh.visible = false;
+          for (let i = 0; i < e.current.length; i++) {
+            e.current[i] = e.initial[i];
+          }
+          e.positionAttr.needsUpdate = true;
+          e.material.opacity = 1;
+        }
       };
       anchor.onTargetLost = () => setPhase("scanning");
 
@@ -359,7 +490,33 @@ export default function ARExperience({
 
       // No screen mode o holder fica filho da camera (parenteia em
       // switchMode); nada para atualizar manualmente aqui.
+      // Particulas de entrada: avanca a animacao por frame se ativa.
       renderer.setAnimationLoop(() => {
+        const e = entryRef.current;
+        if (e && e.active) {
+          const t = (performance.now() - e.startMs) / e.durationMs;
+          if (t >= 1) {
+            e.active = false;
+            e.done = true;
+            e.points.visible = false;
+            e.mesh.visible = true;
+          } else {
+            // ease-out cubic
+            const k = 1 - Math.pow(1 - t, 3);
+            const init = e.initial;
+            const fin = e.final;
+            const cur = e.current;
+            for (let i = 0; i < cur.length; i++) {
+              cur[i] = init[i] + (fin[i] - init[i]) * k;
+            }
+            e.positionAttr.needsUpdate = true;
+            // Particulas vao apagando no final do trajeto, e o mesh aparece.
+            if (t > 0.7) {
+              e.material.opacity = Math.max(0, 1 - (t - 0.7) / 0.3);
+              e.mesh.visible = true;
+            }
+          }
+        }
         renderer.render(scene, camera);
       });
     } catch (err) {
